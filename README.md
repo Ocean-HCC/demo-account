@@ -65,7 +65,7 @@ cd ../backend && uv sync && uv run demo-account serve
 
 demo-account 只读 TSP 的本地缓存接口，不调用会让 TSP 向其上游拉数的分时接口，不占用 TSP 的行情额度。
 
-接入前可以在 TSP 所在机器上跑一次验证，逐项检查连通、行情、日线、指数、公开接口与本机时钟，并用临时库跑通开户、下单与结算，结果写入 `backend/verify-output/`：
+接入前可以在 TSP 所在机器上跑一次验证，逐项检查连通、行情、日线、指数、公开接口与本机时钟，并用临时库跑通开户、下单与结算。结果写进 `backend/verify-output/`：`report.md` 给人看，`report.json` 给程序看，`samples/` 是原始响应样本（用于契约测试，不含密码），该目录随仓库提交，可对照 [docs/verification.md](docs/verification.md) 里已入库的一次真实运行：
 
 ```bash
 cd backend && uv run demo-account verify-tsp
