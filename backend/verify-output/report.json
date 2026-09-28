@@ -1,0 +1,326 @@
+{
+  "generated_at": "2026-09-28T18:06:19+08:00",
+  "demo_account_version": "0.1.0",
+  "summary": {
+    "PASS": 11,
+    "WARN": 1,
+    "FAIL": 0,
+    "INFO": 4,
+    "SKIP": 1
+  },
+  "checks": [
+    {
+      "id": "E1",
+      "title": "运行环境",
+      "status": "INFO",
+      "detail": "demo-account 0.1.0，Python 3.12.11，Windows 11",
+      "data": {
+        "now_beijing": "2026-09-28T18:06:02+08:00",
+        "local_time": "2026-09-28T18:06:02+08:00",
+        "tsp_base_url": "http://127.0.0.1:3018",
+        "tsp_password_configured": false,
+        "http_trust_env": false,
+        "symbols": [
+          "600000.SH",
+          "000001.SZ",
+          "300750.SZ",
+          "688981.SH",
+          "510300.SH"
+        ],
+        "python": "3.12.11"
+      }
+    },
+    {
+      "id": "T1",
+      "title": "TSP 服务",
+      "status": "PASS",
+      "detail": "版本 0.2.4，模式 free",
+      "data": {
+        "body": {
+          "status": "ok",
+          "version": "0.2.4",
+          "mode": "free"
+        },
+        "date_header": "Mon, 28 Sep 2026 10:06:08 GMT"
+      }
+    },
+    {
+      "id": "T2",
+      "title": "TSP 行情状态与鉴权",
+      "status": "PASS",
+      "detail": "未设密码，按本机访问；模式 full_market，市场阶段 close_final",
+      "data": {
+        "status": {
+          "enabled": true,
+          "running": true,
+          "paused": false,
+          "mode": "full_market",
+          "realtime_allowed": true,
+          "interval_s": 6.0,
+          "symbol_count": 5578,
+          "index_symbol_count": 8,
+          "etf_symbol_count": 0,
+          "quote_age_ms": 14259.0,
+          "is_trading_hours": false,
+          "is_polling_window": false,
+          "market_phase": "close_final",
+          "final_sync_done": true,
+          "final_sync_failed": null,
+          "last_fetch_ms": 1790589954989.0
+        }
+      }
+    },
+    {
+      "id": "T3",
+      "title": "实时行情已开启",
+      "status": "PASS",
+      "detail": "模式 full_market，股票 5578 只，ETF 0 只，轮询间隔 6.0 秒",
+      "data": {}
+    },
+    {
+      "id": "T4",
+      "title": "行情新鲜度",
+      "status": "INFO",
+      "detail": "当前为 closed，不评估新鲜度；最近抓取 2026-09-28T18:05:54+08:00。交易时段内重跑可验证",
+      "data": {
+        "quote_age_ms": 14259.0
+      }
+    },
+    {
+      "id": "T5",
+      "title": "最新行情快照",
+      "status": "INFO",
+      "detail": "非交易时段，5/5 只有当日行情行",
+      "data": {
+        "rows": [
+          {
+            "symbol": "600000.SH",
+            "row": true,
+            "is_live": true,
+            "date": "2026-09-28",
+            "last": "9.16",
+            "valid_snapshot": true
+          },
+          {
+            "symbol": "000001.SZ",
+            "row": true,
+            "is_live": true,
+            "date": "2026-09-28",
+            "last": "11.30",
+            "valid_snapshot": true
+          },
+          {
+            "symbol": "300750.SZ",
+            "row": true,
+            "is_live": true,
+            "date": "2026-09-28",
+            "last": "291.99",
+            "valid_snapshot": true
+          },
+          {
+            "symbol": "688981.SH",
+            "row": true,
+            "is_live": true,
+            "date": "2026-09-28",
+            "last": "116.56",
+            "valid_snapshot": true
+          },
+          {
+            "symbol": "510300.SH",
+            "row": true,
+            "is_live": true,
+            "date": "2026-09-28",
+            "last": "4.417",
+            "valid_snapshot": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "T6",
+      "title": "标的信息",
+      "status": "PASS",
+      "detail": "600000.SH 浦发银行、000001.SZ 平安银行、300750.SZ 宁德时代、688981.SH 中芯国际、510300.SH 沪深300ETF华泰柏瑞",
+      "data": {
+        "found": [
+          {
+            "symbol": "600000.SH",
+            "name": "浦发银行",
+            "asset_type": "stock",
+            "board": "main",
+            "is_st": false,
+            "list_date_estimate": null
+          },
+          {
+            "symbol": "000001.SZ",
+            "name": "平安银行",
+            "asset_type": "stock",
+            "board": "main",
+            "is_st": false,
+            "list_date_estimate": null
+          },
+          {
+            "symbol": "300750.SZ",
+            "name": "宁德时代",
+            "asset_type": "stock",
+            "board": "chinext",
+            "is_st": false,
+            "list_date_estimate": null
+          },
+          {
+            "symbol": "688981.SH",
+            "name": "中芯国际",
+            "asset_type": "stock",
+            "board": "star",
+            "is_st": false,
+            "list_date_estimate": null
+          },
+          {
+            "symbol": "510300.SH",
+            "name": "沪深300ETF华泰柏瑞",
+            "asset_type": "etf",
+            "board": "main",
+            "is_st": false,
+            "list_date_estimate": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "T7",
+      "title": "日线与未复权价",
+      "status": "WARN",
+      "detail": "600000.SH 日线只到 2026-09-24，应有 2026-09-28；000001.SZ 日线只到 2026-09-24，应有 2026-09-28；300750.SZ 日线只到 2026-09-24，应有 2026-09-28；688981.SH 日线只到 2026-09-24，应有 2026-09-28；510300.SH 日线只到 2026-09-24，应有 2026-09-28",
+      "data": {
+        "expected_last_date": "2026-09-28",
+        "results": [
+          {
+            "symbol": "600000.SH",
+            "rows": 31,
+            "live_rows": 1,
+            "has_raw_close": true,
+            "last_date": "2026-09-24",
+            "last_close": "9.00",
+            "source": "enriched"
+          },
+          {
+            "symbol": "000001.SZ",
+            "rows": 31,
+            "live_rows": 1,
+            "has_raw_close": true,
+            "last_date": "2026-09-24",
+            "last_close": "11.30",
+            "source": "enriched"
+          },
+          {
+            "symbol": "300750.SZ",
+            "rows": 31,
+            "live_rows": 1,
+            "has_raw_close": true,
+            "last_date": "2026-09-24",
+            "last_close": "293.50",
+            "source": "enriched"
+          },
+          {
+            "symbol": "688981.SH",
+            "rows": 31,
+            "live_rows": 1,
+            "has_raw_close": true,
+            "last_date": "2026-09-24",
+            "last_close": "119.98",
+            "source": "enriched"
+          },
+          {
+            "symbol": "510300.SH",
+            "rows": 31,
+            "live_rows": 1,
+            "has_raw_close": true,
+            "last_date": "2026-09-24",
+            "last_close": "4.515",
+            "source": "enriched"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T8",
+      "title": "沪深 300 指数",
+      "status": "PASS",
+      "detail": "TSP 提供，最新 2026-09-28 收盘 4340.755",
+      "data": {
+        "rows": 20
+      }
+    },
+    {
+      "id": "T9",
+      "title": "ETF 复权因子",
+      "status": "INFO",
+      "detail": "近 45 天未识别到 ETF 除权除息（没有发生时属正常）",
+      "data": {}
+    },
+    {
+      "id": "P1",
+      "title": "深交所交易日历",
+      "status": "PASS",
+      "detail": "覆盖至 2026-12-31；今天是交易日，上一个交易日 2026-09-24",
+      "data": {}
+    },
+    {
+      "id": "P2",
+      "title": "东方财富停复牌",
+      "status": "PASS",
+      "detail": "今天收盘时停牌 14 只，如 300211.SZ、002860.SZ、300082.SZ、601198.SH、603400.SH",
+      "data": {}
+    },
+    {
+      "id": "P3",
+      "title": "东方财富分红送转",
+      "status": "PASS",
+      "detail": "600000.SH 近 400 天 1 次实施记录：2026-07-16 每股派 0.42 送 0 转 0",
+      "data": {}
+    },
+    {
+      "id": "P4",
+      "title": "新浪指数兜底",
+      "status": "PASS",
+      "detail": "最新 2026-09-28 收盘 4340.755",
+      "data": {}
+    },
+    {
+      "id": "P5",
+      "title": "本机时钟",
+      "status": "PASS",
+      "detail": "与公开接口服务器相差 -2.2 秒",
+      "data": {}
+    },
+    {
+      "id": "F1",
+      "title": "历史交易日完整流程",
+      "status": "PASS",
+      "detail": "用 2026-09-24 的真实数据跑通：2026-09-24 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending；无持仓卖出按规则被拒绝并留痕；2026-09-24 16:00 结算完成；600000.SH 收盘单按当日收盘价 9.00 成交；510300.SH 收盘单按当日收盘价 4.515 成交；净值定版 0.99998999，总资产 999989.99；基准净值 1.00000000；台账重放核对一致；事件 7 条",
+      "data": {
+        "trade_date": "2026-09-24",
+        "steps": [
+          "2026-09-24 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
+          "无持仓卖出按规则被拒绝并留痕",
+          "2026-09-24 16:00 结算完成",
+          "600000.SH 收盘单按当日收盘价 9.00 成交",
+          "510300.SH 收盘单按当日收盘价 4.515 成交",
+          "净值定版 0.99998999，总资产 999989.99",
+          "基准净值 1.00000000",
+          "台账重放核对一致",
+          "事件 7 条"
+        ],
+        "problems": [],
+        "kept_db": null
+      }
+    },
+    {
+      "id": "F2",
+      "title": "盘中即时单",
+      "status": "SKIP",
+      "detail": "当前不在连续竞价时段，请在 9:30 至 11:30 或 13:00 至 14:57 重跑",
+      "data": {}
+    }
+  ]
+}

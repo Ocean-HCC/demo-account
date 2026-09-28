@@ -11,10 +11,9 @@ __pycache__/
 node_modules/
 frontend/dist/
 
-# Runtime data, secrets and verification output
+# Runtime data and secrets
 data/
 .env
-verify-output*/
 *.zip
 
 # Claude Code per-user settings

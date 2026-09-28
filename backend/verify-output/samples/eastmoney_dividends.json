@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "600000.SH",
+    "ex_date": "2026-07-16",
+    "record_date": "2026-07-15",
+    "pay_date": null,
+    "bonus_per_share": "0",
+    "transfer_per_share": "0",
+    "cash_per_share": "0.42",
+    "factor": null,
+    "source": "eastmoney"
+  }
+]

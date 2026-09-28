@@ -1,0 +1,62 @@
+{
+  "trade_date": "2026-09-24",
+  "steps": [
+    "2026-09-24 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
+    "无持仓卖出按规则被拒绝并留痕",
+    "2026-09-24 16:00 结算完成",
+    "600000.SH 收盘单按当日收盘价 9.00 成交",
+    "510300.SH 收盘单按当日收盘价 4.515 成交",
+    "净值定版 0.99998999，总资产 999989.99",
+    "基准净值 1.00000000",
+    "台账重放核对一致",
+    "事件 7 条"
+  ],
+  "problems": [],
+  "event_types": [
+    "account_created",
+    "order_submitted",
+    "order_submitted",
+    "order_rejected",
+    "order_filled",
+    "order_filled",
+    "settlement_done"
+  ],
+  "fills": [
+    {
+      "seq": 1,
+      "account_id": "acc_eaf9ef11",
+      "order_id": "ord_20260924100000vgxcoy",
+      "symbol": "600000.SH",
+      "kind": "trade",
+      "side": "buy",
+      "qty": 100,
+      "price": "9.00",
+      "gross_amount": "900.00",
+      "commission": "5.00",
+      "stamp_tax": "0",
+      "transfer_fee": "0.01",
+      "cash_delta": "-905.01",
+      "trade_date": "2026-09-24",
+      "occurred_at": "2026-09-24T16:00:00+08:00",
+      "note": "验证收盘单"
+    },
+    {
+      "seq": 2,
+      "account_id": "acc_eaf9ef11",
+      "order_id": "ord_20260924100000zr9wfy",
+      "symbol": "510300.SH",
+      "kind": "trade",
+      "side": "buy",
+      "qty": 1000,
+      "price": "4.515",
+      "gross_amount": "4515.00",
+      "commission": "5.00",
+      "stamp_tax": "0",
+      "transfer_fee": "0",
+      "cash_delta": "-4520.00",
+      "trade_date": "2026-09-24",
+      "occurred_at": "2026-09-24T16:00:00+08:00",
+      "note": "验证 ETF 收盘单"
+    }
+  ]
+}
