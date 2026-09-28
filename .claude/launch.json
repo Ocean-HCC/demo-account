@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo-account (mock)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd backend && DEMO_ACCOUNT_MARKET=mock DEMO_ACCOUNT_DB_PATH=data/mock.sqlite3 DEMO_ACCOUNT_SNAPSHOT_INTERVAL=5 exec uv run demo-account serve --port 8770"
+      ],
+      "port": 8770
+    }
+  ]
+}
