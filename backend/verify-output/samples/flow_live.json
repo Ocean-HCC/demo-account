@@ -1,0 +1,47 @@
+{
+  "steps": [
+    "提交限价单 pending、即时单 pending",
+    "即时单按快照 9.18 加滑点成交于 9.19",
+    "当日买入不可卖出，T+1 生效",
+    "限价单撤销成功"
+  ],
+  "problems": [],
+  "fill": {
+    "seq": 1,
+    "account_id": "acc_1b402602",
+    "order_id": "ord_202609291125460p6zam",
+    "symbol": "600000.SH",
+    "kind": "trade",
+    "side": "buy",
+    "qty": 100,
+    "price": "9.19",
+    "gross_amount": "919.00",
+    "commission": "5.00",
+    "stamp_tax": "0",
+    "transfer_fee": "0.01",
+    "cash_delta": "-924.01",
+    "trade_date": "2026-09-29",
+    "occurred_at": "2026-09-29T11:25:51+08:00",
+    "note": "验证即时单"
+  },
+  "basis": {
+    "snapshot": {
+      "symbol": "600000.SH",
+      "ts": "2026-09-29T11:25:50+08:00",
+      "last": "9.18",
+      "open": "9.15",
+      "prev_close": "9.16",
+      "halted": false,
+      "source": "tsp"
+    },
+    "up_limit": "10.08",
+    "down_limit": "8.24",
+    "slippage_rate": "0.0005",
+    "fill_price": "9.19",
+    "fees": {
+      "commission": "5.00",
+      "stamp_tax": "0",
+      "transfer_fee": "0.01"
+    }
+  }
+}

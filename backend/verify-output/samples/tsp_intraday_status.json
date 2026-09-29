@@ -8,11 +8,11 @@
   "symbol_count": 5578,
   "index_symbol_count": 8,
   "etf_symbol_count": 0,
-  "quote_age_ms": 14259.0,
-  "is_trading_hours": false,
-  "is_polling_window": false,
-  "market_phase": "close_final",
-  "final_sync_done": true,
+  "quote_age_ms": 5084.0,
+  "is_trading_hours": true,
+  "is_polling_window": true,
+  "market_phase": "morning",
+  "final_sync_done": false,
   "final_sync_failed": null,
-  "last_fetch_ms": 1790589954989.0
+  "last_fetch_ms": 1790652323304.0
 }
