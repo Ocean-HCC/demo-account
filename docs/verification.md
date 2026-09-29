@@ -233,6 +233,7 @@ uv run demo-account verify-tsp
 | --- | --- | --- |
 | TSP 偏好 | `realtime_quotes_enabled`: false → **true** | 已持久化，进程重启后仍生效 |
 | TSP 偏好 | `pipeline_pull_etf`: false → **true** | 已持久化 |
+| TSP 偏好 | `realtime_pull_etf`: false → **true** | 09-29 盘中置为 true；因上游快照不含 ETF，实测无效果，见 9.2 |
 | TSP 数据 | 同步 ETF 标的与日K、补齐至 2026-09-28 | 由 TSP 自身管道/修复任务写入 `data/` |
 | demo-account 代码 | **未改动** | 工作树干净 |
 
@@ -261,7 +262,22 @@ TSP 源码树同样**未做任何修改** —— 其中 105 处已修改/未跟�
 
 ### 9.2 ETF 实时拉取不能关
 
-3.2 节认为 `realtime_pull_etf` 保持关闭也能取到 ETF 行情，依据是 18:06 取到了 510300.SH 的当日价 4.417。这个依据站不住：TSP 的 ETF 当日行情读自 ETF 缓存，18:06 时这份缓存是刚跑完的盘后管道写入的。到了盘中，缓存日期还停在前一个交易日，ETF 预计没有实时快照，即时单、限价单和开盘单都无法成交。实现文档 3.2 已把开启 ETF 实时与日线拉取列为交易 ETF 的运行前提；已确认在盘中复跑前打开 `realtime_pull_etf`。
+3.2 节认为 `realtime_pull_etf` 保持关闭也能取到 ETF 行情，依据是 18:06 取到了 510300.SH 的当日价 4.417。这个依据站不住：TSP 的 ETF 当日行情读自 ETF 缓存，18:06 时这份缓存是刚跑完的盘后管道写入的。到了盘中，缓存日期还停在前一个交易日，ETF 预计没有实时快照，即时单、限价单和开盘单都无法成交。实现文档 3.2 已把开启 ETF 实时与日线拉取列为交易 ETF 的运行前提。
+
+**补充更正（2026-09-29 午间核实）**：上面的诊断方向对了，但「打开 `realtime_pull_etf` 即可取到 ETF 盘中行情」这一步**在本机不成立**——开关只决定 TSP 去不去订阅 ETF，而上游 fuyao 快照根本不返回 ETF 行。撤下开关后做了全量核对（非抽样）：
+
+| 核对项 | 结果 |
+| --- | --- |
+| fuyao 快照 `/api/a-share/prices/snapshot` | 5578 行 / 5578 个去重标的 |
+| 其中 ETF 形态代码（51/15/56/58/16/50 开头） | **0** |
+| TSP 维表 `data/instruments_etf/instruments_etf.parquet` | **1732** 只 ETF |
+| 两边交集（能取到实时快照的 ETF） | **0** |
+| `510300.SH` | 维表里在 ✅，快照里不在 ❌ |
+| `etf_symbol_count`（开关为 true 时实测） | 仍为 **0** |
+
+fuyao 插件声明的数据集是 `realtime / daily / adj_factor / financial`，实时端点只有 `/api/a-share/prices/snapshot`（A 股全市场）与 `/api/a-share-index/prices/snapshot`（指数），**没有 ETF 实时通道**。要补上只有两条路：升级 TickFlow 到 Starter+（ETF 实时走 `quotes.get_by_universes(["CN_ETF"])`），或接入带 ETF 实时能力的自定义源（`stock-sdk` 插件声明支持 realtime，但本机 `node_modules` 未安装、状态不可用）。
+
+**处置（发起者决定）**：本机不做 ETF，不再追这条路径。因此 `verify-tsp` 的 T5 会持续显示「ETF 没有实时快照」这一「注意」项——它是环境能力边界，不是代码缺陷，**不影响「报告无失败项」的判定**。ETF 的日线、复权与成交路径本身是通的：F1 中 510300.SH 已按真实收盘价 4.417 成交，ETF 日K 353816 行、覆盖 1675 只（见 3.2 节）。
 
 ### 9.3 M5 状态
 
