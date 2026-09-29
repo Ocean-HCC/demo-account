@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-29T11:25:51+08:00",
+  "generated_at": "2026-09-29T20:01:07+08:00",
   "demo_account_version": "0.1.0",
   "summary": {
-    "PASS": 14,
-    "WARN": 1,
-    "FAIL": 0,
-    "INFO": 2,
-    "SKIP": 0
+    "PASS": 10,
+    "WARN": 0,
+    "FAIL": 2,
+    "INFO": 4,
+    "SKIP": 1
   },
   "checks": [
     {
@@ -15,8 +15,8 @@
       "status": "INFO",
       "detail": "demo-account 0.1.0，Python 3.12.11，Windows 11",
       "data": {
-        "now_beijing": "2026-09-29T11:25:22+08:00",
-        "local_time": "2026-09-29T11:25:22+08:00",
+        "now_beijing": "2026-09-29T20:00:41+08:00",
+        "local_time": "2026-09-29T20:00:41+08:00",
         "tsp_base_url": "http://127.0.0.1:3018",
         "tsp_password_configured": false,
         "http_trust_env": false,
@@ -41,14 +41,14 @@
           "version": "0.2.4",
           "mode": "free"
         },
-        "date_header": "Tue, 29 Sep 2026 03:25:27 GMT"
+        "date_header": "Tue, 29 Sep 2026 12:00:48 GMT"
       }
     },
     {
       "id": "T2",
       "title": "TSP 行情状态与鉴权",
       "status": "PASS",
-      "detail": "未设密码，按本机访问；模式 full_market，市场阶段 morning",
+      "detail": "未设密码，按本机访问；模式 full_market，市场阶段 close_final",
       "data": {
         "status": {
           "enabled": true,
@@ -60,13 +60,13 @@
           "symbol_count": 5578,
           "index_symbol_count": 8,
           "etf_symbol_count": 0,
-          "quote_age_ms": 5084.0,
-          "is_trading_hours": true,
-          "is_polling_window": true,
-          "market_phase": "morning",
-          "final_sync_done": false,
+          "quote_age_ms": 18043890.0,
+          "is_trading_hours": false,
+          "is_polling_window": false,
+          "market_phase": "close_final",
+          "final_sync_done": true,
           "final_sync_failed": null,
-          "last_fetch_ms": 1790652323304.0
+          "last_fetch_ms": 1790665206238.0
         }
       }
     },
@@ -80,17 +80,17 @@
     {
       "id": "T4",
       "title": "行情新鲜度",
-      "status": "PASS",
-      "detail": "行情 5.1 秒前更新",
+      "status": "INFO",
+      "detail": "当前为 closed，不评估新鲜度；最近抓取 2026-09-29T15:00:06+08:00。交易时段内重跑可验证",
       "data": {
-        "quote_age_ms": 5084.0
+        "quote_age_ms": 18043890.0
       }
     },
     {
       "id": "T5",
       "title": "最新行情快照",
-      "status": "WARN",
-      "detail": "ETF 没有实时快照：['510300.SH']。要交易 ETF 请在 TSP 开启 ETF 实时拉取",
+      "status": "INFO",
+      "detail": "非交易时段，4/5 只有当日行情行",
       "data": {
         "rows": [
           {
@@ -106,7 +106,7 @@
             "row": true,
             "is_live": true,
             "date": "2026-09-29",
-            "last": "11.36",
+            "last": "11.35",
             "valid_snapshot": true
           },
           {
@@ -114,7 +114,7 @@
             "row": true,
             "is_live": true,
             "date": "2026-09-29",
-            "last": "289.26",
+            "last": "286.80",
             "valid_snapshot": true
           },
           {
@@ -122,7 +122,7 @@
             "row": true,
             "is_live": true,
             "date": "2026-09-29",
-            "last": "117.35",
+            "last": "117.51",
             "valid_snapshot": true
           },
           {
@@ -189,49 +189,49 @@
     {
       "id": "T7",
       "title": "日线与未复权价",
-      "status": "PASS",
-      "detail": "全部标的日线齐全，最新到 2026-09-28，带未复权价",
+      "status": "FAIL",
+      "detail": "510300.SH 日线只到 2026-09-28，应有 2026-09-29",
       "data": {
-        "expected_last_date": "2026-09-28",
+        "expected_last_date": "2026-09-29",
         "results": [
           {
             "symbol": "600000.SH",
             "rows": 31,
             "live_rows": 1,
-            "today_from_live": false,
+            "today_from_live": true,
             "has_raw_close": true,
-            "last_date": "2026-09-28",
-            "last_close": "9.16",
+            "last_date": "2026-09-29",
+            "last_close": "9.18",
             "source": "enriched"
           },
           {
             "symbol": "000001.SZ",
             "rows": 31,
             "live_rows": 1,
-            "today_from_live": false,
+            "today_from_live": true,
             "has_raw_close": true,
-            "last_date": "2026-09-28",
-            "last_close": "11.30",
+            "last_date": "2026-09-29",
+            "last_close": "11.35",
             "source": "enriched"
           },
           {
             "symbol": "300750.SZ",
             "rows": 31,
             "live_rows": 1,
-            "today_from_live": false,
+            "today_from_live": true,
             "has_raw_close": true,
-            "last_date": "2026-09-28",
-            "last_close": "291.99",
+            "last_date": "2026-09-29",
+            "last_close": "286.80",
             "source": "enriched"
           },
           {
             "symbol": "688981.SH",
             "rows": 31,
             "live_rows": 1,
-            "today_from_live": false,
+            "today_from_live": true,
             "has_raw_close": true,
-            "last_date": "2026-09-28",
-            "last_close": "116.56",
+            "last_date": "2026-09-29",
+            "last_close": "117.51",
             "source": "enriched"
           },
           {
@@ -251,9 +251,9 @@
       "id": "T8",
       "title": "沪深 300 指数",
       "status": "PASS",
-      "detail": "TSP 提供，最新 2026-09-28 收盘 4340.755",
+      "detail": "TSP 提供，最新 2026-09-29 收盘 4345.209",
       "data": {
-        "rows": 20
+        "rows": 21
       }
     },
     {
@@ -288,53 +288,45 @@
       "id": "P4",
       "title": "新浪指数兜底",
       "status": "PASS",
-      "detail": "最新 2026-09-28 收盘 4340.755",
+      "detail": "最新 2026-09-29 收盘 4345.209",
       "data": {}
     },
     {
       "id": "P5",
       "title": "本机时钟",
       "status": "PASS",
-      "detail": "与公开接口服务器相差 -2.3 秒",
+      "detail": "与公开接口服务器相差 -2.5 秒",
       "data": {}
     },
     {
       "id": "F1",
       "title": "最近交易日完整流程",
-      "status": "PASS",
-      "detail": "用 2026-09-28 的真实数据跑通：2026-09-28 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending；无持仓卖出按规则被拒绝并留痕；2026-09-28 16:00 结算完成；600000.SH 收盘单按当日收盘价 9.16 成交；510300.SH 收盘单按当日收盘价 4.417 成交；净值定版 0.99998999，总资产 999989.99；基准净值 1.00000000；台账重放核对一致；事件 7 条",
+      "status": "FAIL",
+      "detail": "定版总资产 999989.99 与现金加市值 995573.99 不一致",
       "data": {
-        "trade_date": "2026-09-28",
+        "trade_date": "2026-09-29",
         "steps": [
-          "2026-09-28 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
+          "2026-09-29 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
           "无持仓卖出按规则被拒绝并留痕",
-          "2026-09-28 16:00 结算完成",
-          "600000.SH 收盘单按当日收盘价 9.16 成交",
-          "510300.SH 收盘单按当日收盘价 4.417 成交",
-          "净值定版 0.99998999，总资产 999989.99",
+          "2026-09-29 16:00 结算完成",
+          "600000.SH 收盘单按当日收盘价 9.18 成交",
+          "510300.SH 收盘单按当日收盘价 4.416 成交",
           "基准净值 1.00000000",
           "台账重放核对一致",
           "事件 7 条"
         ],
-        "problems": [],
+        "problems": [
+          "定版总资产 999989.99 与现金加市值 995573.99 不一致"
+        ],
         "kept_db": null
       }
     },
     {
       "id": "F2",
       "title": "盘中即时单",
-      "status": "PASS",
-      "detail": "提交限价单 pending、即时单 pending；即时单按快照 9.18 加滑点成交于 9.19；当日买入不可卖出，T+1 生效；限价单撤销成功",
-      "data": {
-        "steps": [
-          "提交限价单 pending、即时单 pending",
-          "即时单按快照 9.18 加滑点成交于 9.19",
-          "当日买入不可卖出，T+1 生效",
-          "限价单撤销成功"
-        ],
-        "problems": [],
-        "kept_db": null
-      }
+      "status": "SKIP",
+      "detail": "当前不在连续竞价时段，请在 9:30 至 11:30 或 13:00 至 14:57 重跑",
+      "data": {}
     }
   ]
 }

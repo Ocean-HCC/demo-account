@@ -1,17 +1,18 @@
 {
-  "trade_date": "2026-09-28",
+  "trade_date": "2026-09-29",
   "steps": [
-    "2026-09-28 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
+    "2026-09-29 10:00 开户并提交收盘单：600000.SH pending，510300.SH pending",
     "无持仓卖出按规则被拒绝并留痕",
-    "2026-09-28 16:00 结算完成",
-    "600000.SH 收盘单按当日收盘价 9.16 成交",
-    "510300.SH 收盘单按当日收盘价 4.417 成交",
-    "净值定版 0.99998999，总资产 999989.99",
+    "2026-09-29 16:00 结算完成",
+    "600000.SH 收盘单按当日收盘价 9.18 成交",
+    "510300.SH 收盘单按当日收盘价 4.416 成交",
     "基准净值 1.00000000",
     "台账重放核对一致",
     "事件 7 条"
   ],
-  "problems": [],
+  "problems": [
+    "定版总资产 999989.99 与现金加市值 995573.99 不一致"
+  ],
   "event_types": [
     "account_created",
     "order_submitted",
@@ -24,39 +25,39 @@
   "fills": [
     {
       "seq": 1,
-      "account_id": "acc_fed133de",
-      "order_id": "ord_202609281000004gsmjg",
-      "symbol": "600000.SH",
-      "kind": "trade",
-      "side": "buy",
-      "qty": 100,
-      "price": "9.16",
-      "gross_amount": "916.00",
-      "commission": "5.00",
-      "stamp_tax": "0",
-      "transfer_fee": "0.01",
-      "cash_delta": "-921.01",
-      "trade_date": "2026-09-28",
-      "occurred_at": "2026-09-28T16:00:00+08:00",
-      "note": "验证收盘单"
-    },
-    {
-      "seq": 2,
-      "account_id": "acc_fed133de",
-      "order_id": "ord_20260928100000kwuh3g",
+      "account_id": "acc_405732c1",
+      "order_id": "ord_20260929100000ajcv9c",
       "symbol": "510300.SH",
       "kind": "trade",
       "side": "buy",
       "qty": 1000,
-      "price": "4.417",
-      "gross_amount": "4417.00",
+      "price": "4.416",
+      "gross_amount": "4416.00",
       "commission": "5.00",
       "stamp_tax": "0",
       "transfer_fee": "0",
-      "cash_delta": "-4422.00",
-      "trade_date": "2026-09-28",
-      "occurred_at": "2026-09-28T16:00:00+08:00",
+      "cash_delta": "-4421.00",
+      "trade_date": "2026-09-29",
+      "occurred_at": "2026-09-29T16:00:00+08:00",
       "note": "验证 ETF 收盘单"
+    },
+    {
+      "seq": 2,
+      "account_id": "acc_405732c1",
+      "order_id": "ord_20260929100000wyvw8n",
+      "symbol": "600000.SH",
+      "kind": "trade",
+      "side": "buy",
+      "qty": 100,
+      "price": "9.18",
+      "gross_amount": "918.00",
+      "commission": "5.00",
+      "stamp_tax": "0",
+      "transfer_fee": "0.01",
+      "cash_delta": "-923.01",
+      "trade_date": "2026-09-29",
+      "occurred_at": "2026-09-29T16:00:00+08:00",
+      "note": "验证收盘单"
     }
   ]
 }
