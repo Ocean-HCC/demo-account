@@ -1,8 +1,12 @@
-"""盘中撮合与开盘撮合（方案 4.2、4.3；实现 5.3）。"""
+"""盘中撮合与开盘撮合（方案 4.2、4.3；实现 5.3）。
+
+有待结算日时暂停交易（方案 4.4）：盘中撮合只刷新快照供估值，不处理订单；开盘撮合跳过。
+"""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
@@ -40,6 +44,7 @@ class Engine:
         execution: Execution,
         alerts: AlertService,
         settings: Settings,
+        settlement_pending: Callable[[], date | None],
     ) -> None:
         self.db = db
         self.clock = clock
@@ -50,6 +55,7 @@ class Engine:
         self.execution = execution
         self.alerts = alerts
         self.settings = settings
+        self.settlement_pending = settlement_pending
 
     # ---------------------------------------------------------------- 行情
 
@@ -125,6 +131,8 @@ class Engine:
             return {}
         stats = {"filled": 0, "rejected": 0, "expired": 0, "waiting": 0}
         snaps = self.refresh_snapshots(self.watch_symbols(today))
+        if self.settlement_pending() is not None:
+            return {}
         allowed = self.health.available
         orders = repos.pending_orders(
             self.db.read(), [OrderType.MARKET, OrderType.LIMIT], trade_date=today
@@ -212,7 +220,7 @@ class Engine:
             trading = self.reference.calendar().is_trading_day(today)
         except CalendarUnavailable:
             return {}
-        if not trading or now.time() < T_0930:
+        if not trading or now.time() < T_0930 or self.settlement_pending() is not None:
             return {}
         orders = repos.pending_orders(self.db.read(), [OrderType.OPEN], trade_date=today)
         if not orders:

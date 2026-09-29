@@ -100,13 +100,23 @@ def build_container(
     monitor.alerts = alerts
     execution = Execution(clock, events, alerts, settings)
     accounts = AccountService(db, clock, events, execution, settings)
-    orders = OrderService(db, clock, reference, quotes, events, execution, settings, state)
+    settlement = SettlementService(db, clock, reference, execution, events, alerts, settings)
+    pending = settlement.first_pending_day
+    orders = OrderService(db, clock, reference, quotes, events, execution, settings, state, pending)
     engine = Engine(
-        db, clock, reference, quote_source, quotes, quote_health, execution, alerts, settings
+        db,
+        clock,
+        reference,
+        quote_source,
+        quotes,
+        quote_health,
+        execution,
+        alerts,
+        settings,
+        pending,
     )
-    settlement = SettlementService(db, clock, reference, execution, events, alerts, settings, state)
     portfolio = PortfolioService(db, clock, reference, quotes)
-    market_status = MarketStatusService(db, clock, reference, quotes, quote_health)
+    market_status = MarketStatusService(db, clock, reference, quotes, quote_health, pending)
     delivery = DeliveryService(db, clock, alerts, settings, transport)
     return Container(
         settings=settings,

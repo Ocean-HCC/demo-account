@@ -23,7 +23,6 @@ from ..store.records import Account, NavDaily, SettlementRun
 from .errors import ServiceError
 from .events import AlertService, EventService
 from .execution import Execution
-from .orders import RuntimeState
 
 log = logging.getLogger(__name__)
 NAV_Q = Decimal("0.00000001")
@@ -53,7 +52,6 @@ class SettlementService:
         events: EventService,
         alerts: AlertService,
         settings: Settings,
-        state: RuntimeState,
     ) -> None:
         self.db = db
         self.clock = clock
@@ -62,7 +60,6 @@ class SettlementService:
         self.events = events
         self.alerts = alerts
         self.settings = settings
-        self.state = state
 
     # ---------------------------------------------------------------- 结算
 
@@ -81,6 +78,9 @@ class SettlementService:
         existing = repos.get_run(self.db.read(), d)
         if existing is not None and existing.status == "done":
             return existing
+        earlier = [x for x in self.pending_days(now) if x < d]
+        if earlier:
+            raise ServiceError("SETTLEMENT_CATCHUP", f"须先完成 {earlier[0]} 的结算", 409)
         with self.db.write() as tx:
             repos.upsert_run(tx, SettlementRun(d, "running", now, None, None))
         accounts: list[Account] = []
@@ -112,10 +112,12 @@ class SettlementService:
     def _failed(
         self, d: date, started: datetime, code: str, message: str, level: str
     ) -> SettlementRun:
+        """记失败并告警；同一交易日同一原因已有未解决告警时不重复写入（重试不刷屏）。"""
         run = SettlementRun(d, "failed", started, self.clock.now(), message)
         with self.db.write() as tx:
             repos.upsert_run(tx, run)
-        self.alerts.raise_alert(level, code, message, d)
+            if not repos.has_unresolved_alert(tx, code, d):
+                self.alerts.raise_alert(level, code, message, d, tx=tx)
         return run
 
     def _prepare(self, d: date, cal: SimpleCalendar) -> _Ctx:
@@ -439,35 +441,55 @@ class SettlementService:
             )
         return {"account_id": a.id, "ok": not diffs, "diffs": diffs, "cash": str(state.cash)}
 
-    def catch_up(self) -> list[date]:
-        """启动补跑：自上次结算完成以来错过的交易日按顺序结算（方案 4.6）。"""
-        now = self.clock.now()
-        today = now.date()
-        accounts = repos.list_accounts(self.db.read(), include_archived=True)
+    def _pending_span(self, now: datetime) -> tuple[date, date] | None:
+        """上次 done 之后（没有时从最早的账户创建日起）到已过结算时间的最后一天。"""
+        ex = self.db.read()
+        accounts = repos.list_accounts(ex, include_archived=True)
         if not accounts:
-            return []
-        last = repos.last_done_run(self.db.read())
+            return None
+        last = repos.last_done_run(ex)
         start = last + timedelta(days=1) if last else min(a.created_at.date() for a in accounts)
+        today = now.date()
         end = today if now.time() >= self.settings.settle_time else today - timedelta(days=1)
-        if start > end:
+        return (start, end) if start <= end else None
+
+    def pending_days(self, now: datetime | None = None) -> list[date]:
+        """已过结算时间而未完成结算的交易日，按日期排序（实现 5.4 待结算日与补跑）。
+
+        只读已缓存的日历；日历不可用时返回空，由下单与撮合各自的日历检查拒绝。
+        """
+        span = self._pending_span(now or self.clock.now())
+        if span is None:
             return []
-        self.reference.ensure_calendar(start)
-        self.reference.ensure_calendar(end)
-        cal = self.reference.calendar()
-        days = []
-        d = start
-        while d <= end:
-            if cal.is_trading_day(d):
-                days.append(d)
-            d += timedelta(days=1)
-        done: list[date] = []
-        self.state.catching_up = True
         try:
-            for day in days:
-                run = self.settle(day)
-                if run.status != "done":
-                    break
-                done.append(day)
-        finally:
-            self.state.catching_up = False
+            cal = self.reference.calendar()
+            days = []
+            d = span[0]
+            while d <= span[1]:
+                if cal.is_trading_day(d):
+                    days.append(d)
+                d += timedelta(days=1)
+            return days
+        except CalendarUnavailable:
+            return []
+
+    def first_pending_day(self) -> date | None:
+        """最早的待结算日；不为空时暂停交易（方案 4.4 结算未完成时暂停交易）。"""
+        days = self.pending_days()
+        return days[0] if days else None
+
+    def catch_up(self) -> list[date]:
+        """按日期顺序结算全部待结算日，某一天失败即停（方案 4.4、4.6；实现 5.4）。"""
+        now = self.clock.now()
+        span = self._pending_span(now)
+        if span is None:
+            return []
+        self.reference.ensure_calendar(span[0])
+        self.reference.ensure_calendar(span[1])
+        done: list[date] = []
+        for day in self.pending_days(now):
+            run = self.settle(day)
+            if run.status != "done":
+                break
+            done.append(day)
         return done

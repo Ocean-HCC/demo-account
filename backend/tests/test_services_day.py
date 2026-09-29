@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import httpx
+import pytest
 
 from demo_account.core.matching import amount_to_qty, freeze_amount, slippage_price
 from demo_account.core.models import (
@@ -22,7 +25,9 @@ from demo_account.core.models import (
 )
 from demo_account.core.money import TICK_STOCK, round_cent
 from demo_account.market.base import CorporateAction
+from demo_account.scheduler import Scheduler
 from demo_account.services.delivery import sign
+from demo_account.services.errors import ServiceError
 from demo_account.store import repos
 from support import FRI, MON, THU, TUE, WED, at, make_env
 
@@ -158,6 +163,7 @@ def test_open_order_fills_next_day_at_open_plus_slippage(tmp_path: Path) -> None
     env = make_env(tmp_path)
     env.go(THU, 16, 30)
     a = env.account()
+    assert env.c.settlement.catch_up() == [THU]  # 16:00 后当日先结算，才接受新订单
     o = env.buy(a, "000001.SZ", 100, order_type=OrderType.OPEN)
     assert o.status is OrderStatus.PENDING and o.trade_date == FRI
     env.go(FRI, 9, 31)
@@ -277,6 +283,7 @@ def test_suspension_defers_open_order_until_limit(tmp_path: Path) -> None:
         env.mock.add_suspension("000001.SZ", d)
     env.go(THU, 16, 30)
     a = env.account()
+    assert env.c.settlement.catch_up() == [THU]
     o = env.buy(a, "000001.SZ", 100, order_type=OrderType.OPEN)
     env.go(FRI, 9, 31)
     assert env.c.engine.run_open_matching()["waiting"] == 1
@@ -361,9 +368,81 @@ def test_catch_up_settles_missed_trading_days(tmp_path: Path) -> None:
     env.go(THU, 10, 0)
     a = env.account()
     env.go(MON, 17, 0)
+    assert env.c.settlement.pending_days() == [THU, FRI, MON]
+    with pytest.raises(ServiceError) as e:
+        env.buy(a, PF, 100, order_type=OrderType.OPEN)
+    assert e.value.code == "SETTLEMENT_CATCHUP" and e.value.status == 503
     assert env.c.settlement.catch_up() == [THU, FRI, MON]
     assert [n.trade_date for n in repos.list_nav(env.c.db.read(), a.id)] == [THU, FRI, MON]
-    assert env.c.state.catching_up is False
+    assert env.c.settlement.first_pending_day() is None
+
+
+def test_failed_settlement_pauses_trading_and_catches_up_in_order(tmp_path: Path) -> None:
+    """结算跨日未完成：暂停交易，数据恢复后按日期顺序补齐，前一日收盘单按前一日收盘价成交。"""
+    env = make_env(tmp_path)
+    env.go(THU, 9, 35)
+    a = env.account()
+    buy = env.buy(a, PF, 100)
+    env.cycle()
+    assert env.get(a, buy).status is OrderStatus.FILLED
+    close = env.buy(a, PF, 100, order_type=OrderType.CLOSE)
+    assert close.trade_date == THU
+    env.mock.fail_reference = True
+    env.go(THU, 16, 0)
+    assert env.c.settlement.catch_up() == []
+    env.go(THU, 16, 10)
+    assert env.c.settlement.catch_up() == []
+    assert env.alert_codes().count("SETTLEMENT_DATA_MISSING") == 1  # 重试不重复告警
+    with pytest.raises(ServiceError) as e:
+        env.buy(a, PF, 100)
+    assert (e.value.code, e.value.status) == ("SETTLEMENT_CATCHUP", 503)
+    assert "2026-09-24" in e.value.message
+    st = env.c.market_status.status()
+    assert st["trading_paused"] is True and st["pending_settlement_date"] == "2026-09-24"
+    # 次日盘中仍未补齐：不撮合、不能越过前一日结算，快照照常刷新供估值
+    env.go(FRI, 9, 35)
+    assert env.cycle() == {}
+    assert env.c.quotes.last_update == env.clock.now()
+    with pytest.raises(ServiceError) as e2:
+        env.c.settlement.settle(FRI)
+    assert (e2.value.code, e2.value.status) == ("SETTLEMENT_CATCHUP", 409)
+    env.mock.fail_reference = False
+    env.go(FRI, 16, 5)
+    assert env.c.settlement.catch_up() == [THU, FRI]
+    bar = env.mock.bar(PF, THU)
+    assert bar is not None
+    fill = next(f for f in env.fills(a) if f.order_id == close.id)
+    assert (fill.trade_date, fill.price) == (THU, bar.close)
+    assert [n.trade_date for n in repos.list_nav(env.c.db.read(), a.id)] == [THU, FRI]
+    assert env.c.market_status.status()["trading_paused"] is False
+
+
+def test_scheduler_retries_settlement_without_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """16:00 起结算当日，失败后每 10 分钟重试，过了 23:00 和零点也继续，直到补齐。"""
+    env = make_env(tmp_path)
+    env.go(THU, 10, 0)
+    env.account()
+    sched = Scheduler(env.c)
+    calls: list[datetime] = []
+    real = env.c.settlement.catch_up
+
+    def counting() -> list[date]:
+        calls.append(env.clock.now())
+        return real()
+
+    monkeypatch.setattr(env.c.settlement, "catch_up", counting)
+    env.mock.fail_reference = True
+    for h, m in ((15, 59), (16, 0), (16, 5), (16, 10), (23, 30)):
+        env.go(THU, h, m)
+        asyncio.run(sched.tick())
+    assert [c.strftime("%H:%M") for c in calls] == ["16:00", "16:10", "23:30"]
+    env.mock.fail_reference = False
+    env.go(FRI, 0, 30)
+    asyncio.run(sched.tick())
+    assert env.c.settlement.first_pending_day() is None
+    assert repos.last_done_run(env.c.db.read()) == THU
 
 
 def test_webhook_delivery_signs_and_retries(tmp_path: Path) -> None:

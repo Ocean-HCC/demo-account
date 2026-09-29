@@ -1,6 +1,6 @@
 # 实现
 
-本文档说明已确认的方案在技术上怎样落地：运行形态、架构、模块划分、数据模型、公共接口、关键技术流程、外部依赖的调用策略和工程保障。项目级技术选型已于 2026-09-24 至 2026-09-28 由发起者确认：后端 Python + FastAPI，存储 SQLite 单文件，控制台 React + TypeScript + Vite + Ant Design + ECharts；行情主源是发起者本机运行的 tick-stock-panel（下称 TSP），TSP 没有的交易日历、停复牌和股票分红送转明细用免费公开接口补，ETF 的除权除息用 TSP 的复权因子处理。其余由 AI 做出的重要选择集中列在 8.5 AI 自行决定的选择。
+本文档说明已确认的方案在技术上怎样落地：运行形态、架构、模块划分、数据模型、公共接口、关键技术流程、外部依赖的调用策略和工程保障。项目级技术选型已于 2026-09-24 至 2026-09-28 由发起者确认：后端 Python + FastAPI，存储 SQLite 单文件，控制台 React + TypeScript + Vite + Ant Design + ECharts；行情主源是发起者本机运行的 tick-stock-panel（下称 TSP），TSP 没有的交易日历、停复牌和股票分红送转明细用免费公开接口补，ETF 的除权除息用 TSP 的复权因子处理。2026-09-29 按 TSP 所在机器的接入验证结果修订了当日日线的取法（3.2 TSP 适配器）和结算补跑（5.4 日终结算、5.6 调度与时钟）。其余由 AI 做出的重要选择集中列在 8.5 AI 自行决定的选择。
 
 目录
 
@@ -55,7 +55,7 @@ flowchart LR
 | market | 快照源与基础数据源的接口抽象、TSP 适配器、公开接口适配器、Mock 源、参考数据缓存与日历服务 | core、store |
 | store | SQLite 连接、迁移、各表的读写 | 无 |
 | services | 账户、订单校验与冻结、撮合引擎、日终结算、事件与通知、市场状态 | core、store、market |
-| scheduler | 时钟抽象、后台循环、启动补跑 | services |
+| scheduler | 时钟抽象、后台循环、结算补跑 | services |
 | api | FastAPI 路由、请求响应模型、错误映射、鉴权、静态文件 | services |
 | frontend | 控制台页面 | api |
 
@@ -89,9 +89,10 @@ sequenceDiagram
 
 ```text
 demo-account/
-├── docs/                         蓝图
+├── docs/                         蓝图四层与 questions.md；verification.md 是接入验证记录，不属于蓝图
 ├── backend/
 │   ├── pyproject.toml            uv 管理，包名 demo_account
+│   ├── verify-output/            接入验证产物（report.md、report.json、samples/），随仓库提交，每次验证覆盖
 │   ├── src/demo_account/
 │   │   ├── main.py               FastAPI 应用工厂
 │   │   ├── cli.py                demo-account serve / settle / reconcile / verify-tsp
@@ -105,7 +106,7 @@ demo-account/
 │   │   ├── verify_tsp.py         TSP 接入验证：逐项检查接口与数据，用临时库跑通完整流程，输出报告与原始样本
 │   │   └── api/                  deps · errors · schemas · accounts · orders · portfolio · market · events · admin · static
 │   ├── scripts/seed_mock.py      用假时钟与 Mock 行情生成演示历史
-│   └── tests/
+│   └── tests/                    fixtures/ 下固定了从 verify-output 复制的真实 TSP 样本
 ├── frontend/                     Vite + React 控制台，构建产物 dist/ 由后端托管
 ├── data/                         运行时数据，不入库
 ├── .claude/launch.json           Mock 预览的启动配置
@@ -180,13 +181,14 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 | 市场状态与快照时间 | `GET /api/intraday/status` | 每个周期取一次；`realtime_allowed` 或 `enabled` 为假时视为源不可用；`is_polling_window` 为真而 `last_fetch_ms` 早于 10 分钟时视为行情停滞，本轮失败 |
 | 快照（最新价、今开、最高、最低） | `GET /api/kline/daily/latest?symbol=` | 逐标的调用；`row.is_live` 为真且 `row.date` 等于今天才算有效；`ts` 取 `last_fetch_ms`；前收盘价由 `change_pct` 反推，仅用于展示 |
 | 前收盘价、涨跌停价 | 不调用 TSP | 前收盘价取自已缓存的日线；涨跌停价按 2.2 标的与交易规则计算。TSP 的分时接口在缓存未命中时会向其上游拉数，避免占用 TSP 的行情额度 |
-| 日线（收盘、开盘、复权） | `GET /api/kline/daily?symbol=&start_date=&end_date=` | `raw_close` 为未复权收盘价用于结算与估值；`close` 为前复权价，两者比值用于 ETF 复权因子；开盘、最高、最低价按比值还原；TSP 注入的盘中实时蜡烛（`is_live`）一律丢弃，结算只用收盘后落盘的日线 |
-| 指数日线（沪深 300） | `GET /api/index/daily?symbol=000300.SH&start_date=&end_date=` | 取 `close`；无数据时用 3.3 的新浪兜底 |
+| 日线（收盘、开盘、复权） | `GET /api/kline/daily?symbol=&start_date=&end_date=` | `raw_close` 为未复权收盘价用于结算与估值；`close` 为前复权价，两者比值用于 ETF 复权因子；开盘、最高、最低价按比值还原；带 `is_live` 标记的行按下文「当日日线」处理 |
+| 指数日线（沪深 300） | `GET /api/index/daily?symbol=000300.SH&start_date=&end_date=` | 取 `close`，`is_live` 行同样按「当日日线」处理；无数据时用 3.3 的新浪兜底 |
 | 标的信息 | `GET /api/kline/instruments/search?q=<代码>&asset_types=stock,etf` | 取代码完全匹配的一条；名称判 ST；`asset_type` 判 stock 或 etf。TSP 不提供上市日：近 40 个自然日内日线不超过 5 根时，以首根日线日期作为上市日估计 |
 
+- **当日日线**：北京时间当天 24:00 之前，TSP 一直把当日行标为 `is_live`，即使已经收盘、已经落盘，也会先用内存中的实时值覆盖再返回。因此只在 TSP 行情状态为收盘定版时，才把当日行当作当日日线：`market_phase` 为 `close_final`，`final_sync_done` 为真，`final_sync_failed` 为空（TSP 已取得 15:00 之后的快照）。此时收盘价取已落盘的 `raw_close`，缺失时取 `close`；当日是前复权的锚点，复权价视同未复权价。其余情况的 `is_live` 行一律丢弃，TSP 定版失败的那天也不例外：要等 24:00 以后 TSP 返回落盘行才能结算，其间按方案 4.4 日终结算暂停交易。只有响应里出现当日 `is_live` 行时，才读取 `/api/intraday/status`。
 - **停牌判断**：TSP 会把停牌标的从当日快照中剔除，因此"市场开市但该标的无当日有效快照"视为无行情；是否停牌由 3.3 的停复牌名单决定。
 - **鉴权**：TSP 未设密码时本机直接访问；设了密码则用 `DEMO_ACCOUNT_TSP_PASSWORD` 调 `POST /api/auth/login` 取 `tf_session` cookie，收到 401 或 403 时重新登录一次。
-- **运行前提**（写入 README）：TSP 已配置能提供实时行情的数据源；交易 ETF 时需在 TSP 开启 ETF 实时与日线拉取；TSP 已同步指数列表。
+- **运行前提**（写入 README）：TSP 已配置能提供实时行情的数据源；交易 ETF 时需在 TSP 开启 ETF 实时与日线拉取（偏好 `realtime_pull_etf`、`pipeline_pull_etf`）；TSP 已同步指数列表。
 - **失败处理**：请求失败或超时本轮跳过，连续失败超过 5 次置源为不可用并告警；不可用期间不撮合即时单与限价单（超时规则照常），健康接口显示状态。
 
 ### 3.3 公开接口适配器
@@ -280,7 +282,9 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 
 ### 5.4 日终结算
 
-`settle(trade_date)`：检查 settlement_runs 防重复；拉取当日日线、指数、公司行动与停牌数据，缺失则写 failed 与告警后返回；然后对每个非归档账户在一个事务内执行方案 4.4 的步骤：撮合收盘单（含保护限价判定与 15:00 仍停牌的顺延）、失效过期订单、公司行动（股票按 corporate_actions 明细，ETF 按 3.4 的因子）、T+1 解锁、净值定版、回合统计缓存，每一步写事件；全部账户完成后写 done 并写结算完成事件。顺延不单独产生事件：每个账户当日的收盘单成交、订单失效、订单顺延与公司行动汇总写入该账户结算完成事件的 payload（filled、expired、rejected、deferred、corporate_actions）。送转与分红的应得数量按登记日（缺失时取除权日前一交易日）为止的台账重放确定，不足 1 股的部分按除权日收盘价折成现金。结算后调用 `reconcile(account_id)` 用 2.4 台账重放核对持仓与现金，不一致写告警。启动补跑：找出上次 done 之后到当前应结算的所有交易日，顺序调用 `settle`，期间 api 对下单返回"结算补跑中"。
+`settle(trade_date)`：检查 settlement_runs 防重复；拉取当日日线、指数、公司行动与停牌数据，缺失则写 failed 与告警后返回；然后对每个非归档账户在一个事务内执行方案 4.4 的步骤：撮合收盘单（含保护限价判定与 15:00 仍停牌的顺延）、失效过期订单、公司行动（股票按 corporate_actions 明细，ETF 按 3.4 的因子）、T+1 解锁、净值定版、回合统计缓存，每一步写事件；全部账户完成后写 done 并写结算完成事件。顺延不单独产生事件：每个账户当日的收盘单成交、订单失效、订单顺延与公司行动汇总写入该账户结算完成事件的 payload（filled、expired、rejected、deferred、corporate_actions）。送转与分红的应得数量按登记日（缺失时取除权日前一交易日）为止的台账重放确定，不足 1 股的部分按除权日收盘价折成现金。结算后调用 `reconcile(account_id)` 用 2.4 台账重放核对持仓与现金，不一致写告警。
+
+**待结算日与补跑**：`pending_days()` 按日期顺序列出上次 done 之后已过结算时间、但还没结算完成的交易日；还没有 done 记录时，从最早的账户创建日算起。列表不为空时暂停交易，落实方案 4.4 日终结算：下单返回 `SETTLEMENT_CATCHUP`（503），消息写明最早的待结算日；盘中撮合只刷新快照，不处理订单；开盘撮合跳过。预估、撤单和查询不受影响。`catch_up()` 按日期顺序逐日调用 `settle`，某一天失败就停下。`settle(d)` 发现 d 之前还有待结算日时拒绝执行（`SETTLEMENT_CATCHUP`，409），所以手动结算也只能按日期顺序进行。服务启动时和调度循环都会调用 `catch_up()`（见 5.6 调度与时钟）。结算失败的告警按交易日和原因去重：同一交易日同一原因已有未解决的告警时，不再重复写入。
 
 ### 5.5 事件与通知
 
@@ -289,7 +293,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 ### 5.6 调度与时钟
 
 - `Clock` 协议提供 `now()`（北京时间，固定 UTC+8）；`SystemClock` 用系统时间，`FakeClock` 供测试推进。
-- scheduler 是一个 asyncio 任务，按北京时间计划：8:30 刷新参考数据（日历、当日停复牌、有关标的的信息、涨跌停价与分红送转）；9:30 起在连续竞价时段内按快照周期循环执行盘中撮合，并在开盘后执行开盘撮合；16:00 执行结算，失败后每 30 分钟重试到 23:00；投递工作循环常驻。
+- scheduler 是一个 asyncio 任务，按北京时间计划：8:30 刷新参考数据（日历、当日停复牌、有关标的的信息、涨跌停价与分红送转）；9:30 起在连续竞价时段内按快照周期循环执行盘中撮合，并在开盘后执行开盘撮合；有待结算日时调用 `catch_up()`：每个交易日 16:00 起当日即成为待结算日；失败后每 10 分钟重试一次，不设截止，非交易日照常重试，直到补齐；投递工作循环常驻。
 - 时钟校验：公开接口（深交所、东方财富、新浪）响应的 Date 头与本机时间偏差超过 60 秒时，下单接口返回时钟异常错误并写告警，偏差恢复后自动解除；TSP 与本服务同机运行，不用于比对。TSP 正在轮询但 `last_fetch_ms` 早于 10 分钟时按 3.2 视为行情停滞，连续失败触发行情源告警。
 
 ---
@@ -303,7 +307,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 - 前缀 `/api`，JSON 请求与响应；金额为字符串，数量为整数，时间为 ISO 8601 带 `+08:00`，日期为 `YYYY-MM-DD`。
 - 枚举值：方向 `buy`、`sell`；订单类型 `market`、`limit`、`open`、`close`；订单状态 `pending`、`filled`、`rejected`、`cancelled`、`expired`；账户状态 `active`、`frozen`、`archived`；事件类型 `order_submitted`、`order_rejected`、`order_filled`、`order_cancelled`、`order_expired`、`settlement_done`、`corporate_action`、`reversal`、`account_created`、`account_frozen`、`account_unfrozen`、`account_archived`、`fee_params_changed`。
 - 鉴权：配置 `DEMO_ACCOUNT_API_KEY` 时所有 `/api` 请求需带 `X-API-Key` 头；未配置则不鉴权。
-- 错误：`{"error": {"code": "...", "message": "...", "details": {...}}}`。校验类错误 400，不存在 404，状态冲突 409，结算补跑中 503。错误码与方案的拒绝原因一一对应：`ACCOUNT_NOT_ACTIVE`、`SYMBOL_UNSUPPORTED`、`SYMBOL_INFO_MISSING`、`SYMBOL_SUSPENDED`、`ST_BLOCKED`、`ST_ORDER_TYPE_NOT_ALLOWED`、`ST_DAILY_BUY_LIMIT`、`OUTSIDE_SESSION`、`LOT_SIZE`、`QTY_LIMIT`、`PRICE_OUT_OF_LIMIT`、`PRICE_TICK`、`INSUFFICIENT_CASH`、`INSUFFICIENT_SELLABLE`、`ORDER_NOT_PENDING`、`CLOCK_SKEW`、`SETTLEMENT_CATCHUP`、`CALENDAR_UNAVAILABLE`；以及通用的 `INVALID_REQUEST`、`UNAUTHORIZED`、`ACCOUNT_NOT_FOUND`、`ORDER_NOT_FOUND`、`ACCOUNT_NOT_FROZEN`、`NOT_TRADING_DAY`。
+- 错误：`{"error": {"code": "...", "message": "...", "details": {...}}}`。校验类错误 400，不存在 404，状态冲突 409，结算未完成而暂停交易时 503。错误码与方案的拒绝原因一一对应：`ACCOUNT_NOT_ACTIVE`、`SYMBOL_UNSUPPORTED`、`SYMBOL_INFO_MISSING`、`SYMBOL_SUSPENDED`、`ST_BLOCKED`、`ST_ORDER_TYPE_NOT_ALLOWED`、`ST_DAILY_BUY_LIMIT`、`OUTSIDE_SESSION`、`LOT_SIZE`、`QTY_LIMIT`、`PRICE_OUT_OF_LIMIT`、`PRICE_TICK`、`INSUFFICIENT_CASH`、`INSUFFICIENT_SELLABLE`、`ORDER_NOT_PENDING`、`CLOCK_SKEW`、`SETTLEMENT_CATCHUP`、`CALENDAR_UNAVAILABLE`；以及通用的 `INVALID_REQUEST`、`UNAUTHORIZED`、`ACCOUNT_NOT_FOUND`、`ORDER_NOT_FOUND`、`ACCOUNT_NOT_FROZEN`、`NOT_TRADING_DAY`。
 - 下单校验失败：订单以 rejected 落库并写订单拒绝事件，接口返回错误响应，HTTP 400（账户状态问题 409），错误码即拒绝原因，`details.order` 为该订单。请求结构不合法（如数量与金额都缺）直接返回 400 INVALID_REQUEST，不形成订单。
 - 订单原因码：撮合与结算阶段的拒绝、失效与撤销写在订单的 reason_code：`PRICE_LIMIT_HIT`（触及涨跌停）、`SYMBOL_SUSPENDED`（停牌）、`MARKET_DATA_MISSING`（即时单等待行情超时）、`EXPIRED_AT_CLOSE`（所属交易日收盘未成交）、`DEFER_LIMIT`（停牌顺延超限）、`PROTECT_PRICE_NOT_MET`（收盘单保护限价未满足）、`INSUFFICIENT_CASH`、`INSUFFICIENT_SELLABLE`（成交时不足）、`CANCELLED_BY_USER`、`ACCOUNT_FROZEN`、`ACCOUNT_ARCHIVED`（撤销原因）。
 - 列表接口用 `limit`（默认 100，最大 1000）与 `offset` 分页，按时间倒序；事件接口按序号正序。
@@ -328,7 +332,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 | GET /api/accounts/{id}/nav | 每日定版净值与基准 |
 | GET /api/accounts/{id}/stats | 回合统计 |
 | GET /api/accounts/{id}/events?after=&types=&symbol=&from=&to= | 拉取事件序列，每条带 basis |
-| GET /api/market/status | 是否交易日、当前时段、下次开盘与收盘、数据源健康 |
+| GET /api/market/status | 是否交易日、当前时段、下次开盘与收盘、数据源健康、是否因结算未完成暂停交易与最早的待结算日 |
 | GET /api/market/instruments?q= | 按代码或名称搜索标的 |
 | GET /api/market/instruments/{symbol} | 标的信息、前收、涨跌停价、停牌、ST、板块 |
 | GET /api/market/quotes?symbols= | 最新快照（缓存） |
@@ -339,7 +343,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 | GET /api/admin/alerts | 告警列表，可含已解决 |
 | POST /api/admin/alerts/{id}/resolve | 标记告警已解决 |
 | GET /api/admin/settlements | 最近的结算记录 |
-| GET /api/health | 进程、数据源、最近快照时间、最近结算日 |
+| GET /api/health | 进程、数据源、最近快照时间、最近结算日、最早的待结算日 |
 | GET / | 控制台静态文件，未知路径回退 index.html |
 
 ### 6.3 Webhook 与 SSE
@@ -371,9 +375,9 @@ Webhook 请求：`POST webhook_url`，JSON 体 `{event_id, account_id, seq, type
 
 - core：每条金融规则一组用例，覆盖方案 7.2 规则与 8. 异常与边界：申报数量与单笔上限、价格精度、涨跌停价、新股无涨跌停、费用（最低佣金、印花税单向、ETF 免税）、滑点方向与取整、冻结金额、按金额折算、保护限价判定、风险警示股订单类型与日买入上限、时段与所属交易日、FIFO 回合、回撤、年化。
 - 台账性质测试：随机生成成交序列，`replay` 的结果必须等于逐笔更新的 positions 与现金。
-- services：用 FakeClock 与 Mock 源驱动完整交易日：下单、盘中撮合、开盘撮合、限价触及、收盘单与保护限价、除权除息（股票明细与 ETF 因子）、T+1 解锁、净值定版、重复结算幂等、补跑、冻结撤单、幂等键、事件序列完整性（每个账务变更恰有一条事件）。
-- market：TSP 与公开接口适配器用录制的响应样本做解析测试；字段缺失时必须报错而不是猜测。真实公开接口测试默认跳过，设置 `DEMO_ACCOUNT_LIVE_TESTS=1` 时运行。
-- 接入验证：`demo-account verify-tsp` 在 TSP 所在机器上运行，检查 TSP 连通与鉴权、实时行情、标的、日线与未复权价、指数、公开接口与本机时钟，并在临时库里用上一个交易日的真实数据跑通开户、收盘单、结算与核对，交易时段内再验证即时单成交；结果写入 report.md、report.json 与 samples/，不含密码。它自身用模拟上游测试覆盖交易时段、收盘后、TSP 不可用与需要密码几种情形。
+- services：用 FakeClock 与 Mock 源驱动完整交易日：下单、盘中撮合、开盘撮合、限价触及、收盘单与保护限价、除权除息（股票明细与 ETF 因子）、T+1 解锁、净值定版、重复结算幂等、补跑、结算失败跨日时暂停交易并按序补结算、冻结撤单、幂等键、事件序列完整性（每个账务变更恰有一条事件）。
+- market：TSP 与公开接口适配器用录制的响应样本做解析测试，TSP 样本包括 TSP 所在机器的真实响应（从 `verify-output/samples` 复制到 `tests/fixtures/` 固定下来，例如收盘定版后仍带 `is_live` 的当日行）；字段缺失时必须报错而不是猜测。真实公开接口测试默认跳过，设置 `DEMO_ACCOUNT_LIVE_TESTS=1` 时运行。
+- 接入验证：`demo-account verify-tsp` 在 TSP 所在机器上运行，检查 TSP 连通与鉴权、实时行情、标的、日线与未复权价、指数、公开接口与本机时钟。日线检查取不到最近一个已收盘交易日的日线时判失败。之后在临时库里用这一天的真实数据跑通开户、收盘单、结算与核对；交易日 16:00 以后，这一天就是当天，因此也覆盖了当日结算的取数。交易时段内再验证即时单成交。结果写入 report.md、report.json 与 samples/，不含密码。它自身用模拟上游测试覆盖交易时段、收盘后、TSP 不可用与需要密码几种情形。
 - api：FastAPI TestClient 覆盖每个接口的成功与错误码。
 - frontend：`tsc -b` 与 `vite build` 通过；关键页面在本地用浏览器实际走一遍。
 - 修 bug 先写复现测试。
@@ -449,6 +453,10 @@ cd ../backend && uv sync && uv run demo-account serve
 | 顺延汇总写入结算完成事件，不新增事件类型 | 事件类型保持方案 5.6 的集合 |
 | 现金由初始资金加台账现金变动在 Python 中用 Decimal 求和 | SQLite 的 SUM 走浮点，会丢精度 |
 | ruff 把 FastAPI 的 Depends、Query、Header、Path 登记为不可变调用 | 这是 FastAPI 依赖注入的惯用写法 |
+| 收盘定版后的当日行，收盘价优先取落盘的 `raw_close` | TSP 盘后管道会按官方日线校正落盘值，比内存里的实时值可靠 |
+| 结算失败后每 10 分钟重试 | 结算未完成期间暂停交易，间隔短能更快恢复；告警已去重，不会刷屏 |
+| 暂停交易期间盘中撮合仍刷新快照 | 方案 8.3 要求盘中估值仍然可看 |
+| 暂停交易由待结算日实时推导，不设进程内开关 | 状态只来自 settlement_runs 与日历，重启、手动结算和调度都不会让它过时 |
 
 ### 8.6 里程碑
 
@@ -458,6 +466,6 @@ cd ../backend && uv sync && uv run demo-account serve
 | M2 | store、services、scheduler、api，用 Mock 源 | FakeClock 驱动完整交易日的测试通过；`DEMO_ACCOUNT_MARKET=mock` 可启动并通过接口开户、下单、结算 |
 | M3 | TSP 与公开接口适配器、健康检查 | 解析测试通过；连接本机 TSP 取到快照、日线、指数，取到日历、停复牌、分红送转 |
 | M4 | 控制台五个页面 | `tsc -b` 与 `vite build` 通过，浏览器实际操作通过 |
-| M5 | README、.env.example、接入验证工具、真实运行验证 | 发起者在 TSP 所在机器上按验证文档运行 `demo-account verify-tsp`，任意时间与交易时段各一次，报告无失败项 |
+| M5 | README、.env.example、接入验证工具、真实运行验证 | 发起者在 TSP 所在机器上按验证文档运行 `demo-account verify-tsp`，交易时段内一次、交易日 16:00 以后一次，报告无失败项 |
 
 每个里程碑完成后暂停，向发起者汇报测试结果与蓝图对照，确认后进入下一个。

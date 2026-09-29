@@ -95,11 +95,16 @@ def main(argv: list[str] | None = None) -> int:
         return _verify_tsp(settings, args)
 
     from .services.container import build_container
+    from .services.errors import ServiceError
 
     c = build_container(settings)
     if args.cmd == "settle":
         d = date.fromisoformat(args.date) if args.date else c.clock.now().date()
-        run = c.settlement.settle(d)
+        try:
+            run = c.settlement.settle(d)
+        except ServiceError as e:  # 例如更早的交易日还没结算（方案 4.4 顺序）
+            print(json.dumps({"error": {"code": e.code, "message": e.message}}, ensure_ascii=False))
+            return 1
         print(json.dumps(run.to_dict(), ensure_ascii=False))
         return 0 if run.status == "done" else 1
     if args.cmd == "reconcile":
@@ -123,7 +128,7 @@ def _verify_tsp(settings: Settings, args: argparse.Namespace) -> int:
     for c in checks:
         print(f"[{LABEL[c.status]}] {c.id} {c.title}：{c.detail}")
     failed = sum(1 for c in checks if c.status == "FAIL")
-    print(f"完成：失败 {failed} 项。报告 {out / 'report.md'}，请把整个 {out.name} 目录打包发回")
+    print(f"完成：失败 {failed} 项。报告 {out / 'report.md'}，原始响应样本在 {out / 'samples'}")
     return 1 if failed else 0
 
 

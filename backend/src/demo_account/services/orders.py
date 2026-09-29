@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -72,9 +73,8 @@ class OrderRequest:
 
 @dataclass
 class RuntimeState:
-    """进程级运行状态：结算补跑中不接受新订单；时钟异常时拒绝下单。"""
+    """进程级运行状态：时钟异常时拒绝下单。结算未完成的暂停由待结算日推导，不在这里保存。"""
 
-    catching_up: bool = False
     clock_skew: bool = False
 
 
@@ -113,6 +113,7 @@ class OrderService:
         execution: Execution,
         settings: Settings,
         state: RuntimeState,
+        settlement_pending: Callable[[], date | None],
     ) -> None:
         self.db = db
         self.clock = clock
@@ -122,6 +123,7 @@ class OrderService:
         self.execution = execution
         self.settings = settings
         self.state = state
+        self.settlement_pending = settlement_pending
 
     # ---------------------------------------------------------------- 对外
 
@@ -235,8 +237,11 @@ class OrderService:
     # ---------------------------------------------------------------- 内部
 
     def _guard(self) -> None:
-        if self.state.catching_up:
-            raise ServiceError("SETTLEMENT_CATCHUP", "结算补跑中，暂不接受新订单", 503)
+        pending = self.settlement_pending()
+        if pending is not None:
+            raise ServiceError(
+                "SETTLEMENT_CATCHUP", f"{pending} 的日终结算尚未完成，暂停交易，完成后再下单", 503
+            )
         if self.state.clock_skew:
             raise ServiceError("CLOCK_SKEW", "系统时钟与北京时间偏差过大，暂停下单", 503)
 

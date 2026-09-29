@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from collections.abc import Callable
+from datetime import date, datetime
 from typing import Any
 
 from ..clock import Clock
@@ -92,12 +93,14 @@ class MarketStatusService:
         reference: Any,
         quotes: QuoteCache,
         quote_health: SourceHealth,
+        settlement_pending: Callable[[], date | None],
     ) -> None:
         self.db = db
         self.clock = clock
         self.reference = reference
         self.quotes = quotes
         self.quote_health = quote_health
+        self.settlement_pending = settlement_pending
 
     def status(self) -> dict[str, Any]:
         now = self.clock.now()
@@ -131,5 +134,8 @@ class MarketStatusService:
         out["last_snapshot_at"] = iso(self.quotes.last_update) if self.quotes.last_update else None
         last = repos.last_done_run(self.db.read())
         out["last_settlement_date"] = last.isoformat() if last else None
+        pending = self.settlement_pending()
+        out["trading_paused"] = pending is not None  # 结算未完成时暂停交易（方案 4.4）
+        out["pending_settlement_date"] = pending.isoformat() if pending else None
         out["unresolved_alerts"] = repos.count_unresolved_alerts(self.db.read())
         return out

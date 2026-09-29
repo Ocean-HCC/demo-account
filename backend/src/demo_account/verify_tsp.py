@@ -35,6 +35,7 @@ from .market.tsp_source import (
     TspClient,
     TspQuoteSource,
     TspReferenceSource,
+    close_final,
     detect_factors,
     parse_daily_rows,
     parse_latest_row,
@@ -214,13 +215,13 @@ class Verifier:
         self._guard("P4", "新浪指数兜底", self.check_sina)
         self._guard("P5", "本机时钟", self.check_clock)
         if not self.run_e2e:
-            self.add("F1", "历史交易日完整流程", SKIP, "按参数跳过流程验证")
+            self.add("F1", "最近交易日完整流程", SKIP, "按参数跳过流程验证")
             self.add("F2", "盘中即时单", SKIP, "按参数跳过流程验证")
         elif not self.tsp_ok or self.calendar is None:
-            self.add("F1", "历史交易日完整流程", SKIP, "TSP 或交易日历不可用，跳过")
+            self.add("F1", "最近交易日完整流程", SKIP, "TSP 或交易日历不可用，跳过")
             self.add("F2", "盘中即时单", SKIP, "TSP 或交易日历不可用，跳过")
         else:
-            self._guard("F1", "历史交易日完整流程", self.check_history_flow)
+            self._guard("F1", "最近交易日完整流程", self.check_history_flow)
             self._guard("F2", "盘中即时单", self.check_live_flow)
         self.write_report()
         return self.checks
@@ -499,12 +500,15 @@ class Verifier:
             )
 
     def check_daily(self) -> None:
+        """日线缺最近一个已收盘交易日时判失败：交易日 16:00 后缺当天即当日结算会失败。"""
         now = self.now()
         expected = self.last_completed_day()
         start = now.date() - timedelta(days=45)
+        live_day = now.date() if close_final(self.status) else None
         results: list[dict[str, Any]] = []
         worst = PASS
         notes: list[str] = []
+        behind = False
         for sym in self.symbols:
             payload = self.client.get_json(
                 "/api/kline/daily",
@@ -519,7 +523,7 @@ class Verifier:
             rows = rows if isinstance(rows, list) else []
             final_rows = [r for r in rows if not r.get("is_live")]
             has_raw = bool(final_rows) and all("raw_close" in r for r in final_rows)
-            bars = parse_daily_rows(sym, rows, tick_for(guess_asset_type(sym)))
+            bars = parse_daily_rows(sym, rows, tick_for(guess_asset_type(sym)), live_day)
             self.bars[sym] = bars
             last = bars[-1].trade_date if bars else None
             results.append(
@@ -527,6 +531,7 @@ class Verifier:
                     "symbol": sym,
                     "rows": len(rows),
                     "live_rows": len(rows) - len(final_rows),
+                    "today_from_live": live_day is not None and last == live_day,
                     "has_raw_close": has_raw,
                     "last_date": last,
                     "last_close": bars[-1].close if bars else None,
@@ -538,12 +543,24 @@ class Verifier:
                 notes.append(f"{sym} 没有日线")
                 continue
             if last is not None and last < expected:
-                worst = FAIL if worst == FAIL else WARN
+                worst = FAIL
+                behind = True
                 notes.append(f"{sym} 日线只到 {last}，应有 {expected}")
             if not has_raw and guess_asset_type(sym) is AssetType.ETF:
                 worst = FAIL if worst == FAIL else WARN
                 notes.append(f"{sym} 缺少未复权价 raw_close，无法识别 ETF 除权除息")
-        detail = "；".join(notes) if notes else f"全部标的日线齐全，最新到 {expected}，带未复权价"
+        if behind and expected == now.date() and live_day is None:
+            s = self.status or {}
+            notes.append(
+                f"TSP 尚未收盘定版（market_phase={s.get('market_phase')}，"
+                f"final_sync_done={s.get('final_sync_done')}，"
+                f"final_sync_failed={s.get('final_sync_failed')}），今天的日终结算会取不到收盘价"
+            )
+        if notes:
+            detail = "；".join(notes)
+        else:
+            src = "（当日行取自 TSP 收盘定版后的实时行）" if expected == live_day else ""
+            detail = f"全部标的日线齐全，最新到 {expected}{src}，带未复权价"
         self.add(
             "T7", "日线与未复权价", worst, detail, expected_last_date=expected, results=results
         )
@@ -700,7 +717,7 @@ class Verifier:
 
     def check_history_flow(self) -> None:
         assert self.calendar is not None
-        d = self.calendar.prev_trading_day(self.now().date())
+        d = self.last_completed_day()  # 交易日 16:00 后即当天，覆盖当日结算的取数
         stock = self.stocks()[0] if self.stocks() else "600000.SH"
         etf = self.etfs()[0] if self.etfs() else None
         fake = FakeClock(_at(d, 10, 0))
@@ -830,7 +847,7 @@ class Verifier:
         detail = "；".join(problems) if problems else f"用 {d} 的真实数据跑通：" + "；".join(steps)
         self.add(
             "F1",
-            "历史交易日完整流程",
+            "最近交易日完整流程",
             status,
             detail,
             trade_date=d,

@@ -1,6 +1,7 @@
-"""后台调度（实现 5.6）：按北京时间触发参考数据刷新、盘中撮合、开盘撮合、日终结算与投递。
+"""后台调度（实现 5.6）：按北京时间触发参考数据刷新、盘中撮合、开盘撮合、结算补跑与投递。
 
-scheduler 只决定什么时候调用哪个 service；所有业务逻辑都在 services 中。
+scheduler 只决定什么时候调用哪个 service；所有业务逻辑都在 services 中。结算按待结算日推进：
+交易日 16:00 起当日成为待结算日，失败后每 10 分钟重试、不设截止，非交易日也照常重试。
 """
 
 from __future__ import annotations
@@ -16,8 +17,7 @@ from .services.container import Container
 
 log = logging.getLogger(__name__)
 REFRESH_AT = time(8, 30)
-SETTLE_GIVE_UP = time(23, 0)
-SETTLE_RETRY = timedelta(minutes=30)
+SETTLE_RETRY = timedelta(minutes=10)
 DELIVERY_EVERY = 5.0
 
 
@@ -28,7 +28,6 @@ class Scheduler:
         self._stop = asyncio.Event()
         self._refreshed: date | None = None
         self._last_cycle: datetime | None = None
-        self._settled: date | None = None
         self._settle_next: datetime | None = None
         self._last_delivery: datetime | None = None
         self._calendar_alerted: date | None = None
@@ -69,6 +68,13 @@ class Scheduler:
                 self._calendar_alerted = today
                 c.alerts.raise_alert("error", "CALENDAR_UNAVAILABLE", f"交易日历不可用：{e}", today)
             return
+        if (
+            self._settle_next is None or now >= self._settle_next
+        ) and c.settlement.first_pending_day() is not None:
+            self._settle_next = now + SETTLE_RETRY  # 先排好下一次，补跑抛错也不会每秒重试
+            await asyncio.to_thread(c.settlement.catch_up)
+            if c.settlement.first_pending_day() is None:
+                self._settle_next = None
         if not trading:
             return
         if self._refreshed != today and t >= REFRESH_AT:
@@ -82,14 +88,3 @@ class Scheduler:
             self._last_cycle = now
             await asyncio.to_thread(c.engine.run_open_matching)
             await asyncio.to_thread(c.engine.run_intraday_cycle)
-        if (
-            c.settings.settle_time <= t < SETTLE_GIVE_UP
-            and self._settled != today
-            and (self._settle_next is None or now >= self._settle_next)
-        ):
-            run = await asyncio.to_thread(c.settlement.settle, today)
-            if run.status == "done":
-                self._settled = today
-                self._settle_next = None
-            else:
-                self._settle_next = now + SETTLE_RETRY

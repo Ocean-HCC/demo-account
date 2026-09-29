@@ -59,13 +59,13 @@ cd ../backend && uv sync && uv run demo-account serve
 行情快照、日线、指数与标的信息来自你本机运行的 tick-stock-panel（下称 TSP，默认 http://127.0.0.1:3018 ）；交易日历来自深交所官网，停复牌与股票分红送转来自东方财富数据中心，沪深 300 在 TSP 缺数据时改用新浪。TSP 需要满足：
 
 - **实时行情**：TSP 已配置能提供实时行情的数据源（TickFlow 付费 key，或 fuyao、stock-sdk 插件）。没有实时行情时即时单与限价单无法成交，健康检查会显示"TSP 未开启实时行情"。
-- **ETF**：要交易 ETF 时，在 TSP 开启 ETF 的实时与日线拉取；ETF 的除权除息依赖 TSP 的复权数据。
+- **ETF**：要交易 ETF 时，在 TSP 开启 ETF 的实时与日线拉取（偏好 `realtime_pull_etf`、`pipeline_pull_etf`）。不开实时拉取时盘中取不到 ETF 行情，ETF 订单无法成交；ETF 的除权除息依赖 TSP 的复权数据。
 - **指数**：TSP 已同步指数列表。
 - **密码**：TSP 设了访问密码时，把密码写进 `.env` 的 `DEMO_ACCOUNT_TSP_PASSWORD`。
 
 demo-account 只读 TSP 的本地缓存接口，不调用会让 TSP 向其上游拉数的分时接口，不占用 TSP 的行情额度。
 
-接入前可以在 TSP 所在机器上跑一次验证，逐项检查连通、行情、日线、指数、公开接口与本机时钟，并用临时库跑通开户、下单与结算。结果写进 `backend/verify-output/`：`report.md` 给人看，`report.json` 给程序看，`samples/` 是原始响应样本（用于契约测试，不含密码），该目录随仓库提交，可对照 [docs/verification.md](docs/verification.md) 里已入库的一次真实运行：
+接入前在 TSP 所在机器上跑两次验证：交易时段内一次，验证即时单成交；交易日 16:00 以后一次，验证当日日线与当日结算。每次都会逐项检查连通、行情、日线、指数、公开接口与本机时钟，并用临时库跑通开户、下单与结算。结果写进 `backend/verify-output/`：`report.md` 给人看，`report.json` 给程序看，`samples/` 是原始响应样本（不含密码），该目录随仓库提交、每次验证覆盖，契约测试用到的样本另外固定在 `backend/tests/fixtures/`，可对照 [docs/verification.md](docs/verification.md) 里已入库的一次真实运行：
 
 ```bash
 cd backend && uv run demo-account verify-tsp
@@ -121,8 +121,9 @@ curl -s "http://127.0.0.1:8770/api/accounts/<账户号>/events?after=0&types=ord
 
 ## 4. 日常运维
 
-- **自动任务**：8:30 刷新参考数据；连续竞价时段按快照周期撮合；16:00 日终结算，失败每 30 分钟重试到 23:00；服务启动时补跑错过的交易日。
-- **手动命令**：在 `backend/` 下执行 `uv run demo-account settle --date 2026-09-28` 补结算某天，`uv run demo-account reconcile <账户号>` 用台账重放核对持仓。
+- **自动任务**：8:30 刷新参考数据；连续竞价时段按快照周期撮合；16:00 日终结算，失败每 10 分钟重试直到完成，不设截止，非交易日也重试；服务启动时补跑错过的交易日。
+- **结算未完成时暂停交易**：只要有已过 16:00 却还没结算完的交易日，就不接受新订单（`SETTLEMENT_CATCHUP`）、不撮合，直到按日期顺序补齐；撤单与查询不受影响。`GET /api/health` 的 `trading_paused` 与 `pending_settlement_date` 显示当前状态。
+- **手动命令**：在 `backend/` 下执行 `uv run demo-account settle --date 2026-09-28` 补结算某天（更早的交易日还没结算时会拒绝，需按日期顺序），`uv run demo-account reconcile <账户号>` 用台账重放核对持仓。
 - **告警**：结算数据缺失、数据源连续失败、台账不一致、时钟偏差等写入告警，控制台页头显示未解决数量，也可用 `GET /api/admin/alerts` 查看。
 - **备份**：复制 `data/` 下的 SQLite 文件即可；运行中备份请先停服，或连同 `-wal` 文件一起复制。
 - **日志**：JSON 行输出到标准错误。

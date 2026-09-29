@@ -994,6 +994,14 @@ def list_alerts(ex: Executor, unresolved_only: bool = True, limit: int = 100) ->
     return [_row_alert(r) for r in ex.execute(sql, (limit,)).fetchall()]
 
 
+def has_unresolved_alert(ex: Executor, code: str, trade_date: date) -> bool:
+    r = ex.execute(
+        "SELECT 1 FROM alerts WHERE code=? AND trade_date=? AND resolved_at IS NULL LIMIT 1",
+        (code, d2s(trade_date)),
+    ).fetchone()
+    return r is not None
+
+
 def count_unresolved_alerts(ex: Executor) -> int:
     r = ex.execute("SELECT COUNT(*) AS n FROM alerts WHERE resolved_at IS NULL").fetchone()
     return int(r["n"])

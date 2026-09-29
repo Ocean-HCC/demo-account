@@ -1,7 +1,8 @@
 """tick-stock-panel 适配器（实现 3.2）。
 
 行情快照、日线、指数日线与标的信息只读 TSP 的本地接口；交易日历、停复牌与股票分红送转转交
-公开接口适配器。TSP 注入到日线里的盘中实时蜡烛（is_live）一律丢弃，结算只用收盘后落盘的日线。
+公开接口适配器。TSP 在北京时间当天 24:00 前一直把当日日线标为 is_live（已落盘的也会被实时值覆盖），
+只有 TSP 已收盘定版时才把当日行当作日线，其余 is_live 行一律丢弃（实现 3.2 当日日线）。
 """
 
 from __future__ import annotations
@@ -83,26 +84,59 @@ def parse_latest_row(symbol: str, payload: Any, today: date, ts: datetime) -> Sn
     )
 
 
-def parse_daily_rows(symbol: str, rows: Any, tick: Decimal) -> list[DailyBar]:
-    """/api/kline/daily：close 为前复权价，raw_close 为未复权价；开盘价按比值还原。"""
+def close_final(status: Any) -> bool:
+    """TSP 已完成当日收盘定版：取得了 15:00 之后的快照且未报定版失败（实现 3.2 当日日线）。"""
+    return (
+        isinstance(status, dict)
+        and status.get("market_phase") == "close_final"
+        and status.get("final_sync_done") is True
+        and not status.get("final_sync_failed")
+    )
+
+
+def _is_live_on(row: Any, day: date) -> bool:
+    return isinstance(row, dict) and bool(row.get("is_live")) and _row_day(row) == day.isoformat()
+
+
+def _row_day(row: dict[str, Any]) -> str:
+    return str(row.get("date"))[:10]
+
+
+def parse_daily_rows(
+    symbol: str, rows: Any, tick: Decimal, final_live_date: date | None = None
+) -> list[DailyBar]:
+    """/api/kline/daily：close 为前复权价，raw_close 为未复权价；开盘价按比值还原。
+
+    is_live 行只在日期等于 final_live_date（TSP 已收盘定版的当天）时保留：收盘价取落盘的
+    raw_close，缺失时取 close；当日是前复权锚点，复权价视同未复权价。
+    """
     if not isinstance(rows, list):
         raise MarketDataError("TSP 日线返回结构不符")
-    parsed: list[tuple[date, dict[str, Any]]] = []
+    live_day = final_live_date.isoformat() if final_live_date else None
+    parsed: list[tuple[date, dict[str, Any], bool]] = []
     for row in rows:
-        if row.get("is_live"):
+        live = bool(row.get("is_live"))
+        if live and _row_day(row) != live_day:
             continue
         try:
-            parsed.append((date.fromisoformat(str(row["date"])[:10]), row))
-        except (KeyError, ValueError) as e:
+            parsed.append((date.fromisoformat(_row_day(row)), row, live))
+        except ValueError as e:
             raise MarketDataError(f"TSP 日线字段不符: {row}") from e
     parsed.sort(key=lambda x: x[0])
     bars: list[DailyBar] = []
     prev_raw: Decimal | None = None
-    for d, row in parsed:
-        adj = _num(row.get("close"))
-        if adj is None or adj <= 0:
-            continue
-        raw = _price(row.get("raw_close"), tick) or round_to_tick(adj, tick)
+    for d, row, live in parsed:
+        if live:
+            final = _price(row.get("raw_close"), tick) or _price(row.get("close"), tick)
+            if final is None:
+                continue
+            raw, adj = final, final
+        else:
+            close = _num(row.get("close"))
+            if close is None or close <= 0:
+                continue
+            raw = _price(row.get("raw_close"), tick) or round_to_tick(close, tick)
+            adj = close
         ratio = raw / adj
         open_adj = _num(row.get("open"))
         high = _price(row.get("raw_high"), tick)
@@ -299,13 +333,21 @@ class TspReferenceSource:
             return None
         return bars[0].trade_date
 
+    def final_live_date(self, rows: Any) -> date | None:
+        """响应里有当日 is_live 行时读取 TSP 行情状态：已收盘定版则当日行可作日线，返回今天。"""
+        today = self.clock.now().date()
+        if not isinstance(rows, list) or not any(_is_live_on(r, today) for r in rows):
+            return None
+        return today if close_final(self.client.get_json("/api/intraday/status")) else None
+
     def daily_bars(self, symbol: str, start: date, end: date) -> list[DailyBar]:
         payload = self.client.get_json(
             "/api/kline/daily",
             {"symbol": symbol, "start_date": start.isoformat(), "end_date": end.isoformat()},
         )
         rows = payload.get("rows") if isinstance(payload, dict) else None
-        bars = parse_daily_rows(symbol, rows, tick_for(guess_asset_type(symbol)))
+        tick = tick_for(guess_asset_type(symbol))
+        bars = parse_daily_rows(symbol, rows, tick, self.final_live_date(rows))
         return [b for b in bars if start <= b.trade_date <= end]
 
     def price_limits(self, symbol: str, d: date) -> PriceLimits | None:
@@ -329,12 +371,15 @@ class TspReferenceSource:
                 {"symbol": code, "start_date": start.isoformat(), "end_date": end.isoformat()},
             )
             rows = payload.get("rows") if isinstance(payload, dict) else None
+            live_day = self.final_live_date(rows)
             out = []
             for r in rows or []:
                 close = _num(r.get("close"))
-                if r.get("is_live") or close is None or close <= 0:
+                if close is None or close <= 0:
                     continue
-                out.append((date.fromisoformat(str(r["date"])[:10]), close.quantize(_INDEX_Q)))
+                if r.get("is_live") and (live_day is None or _row_day(r) != live_day.isoformat()):
+                    continue
+                out.append((date.fromisoformat(_row_day(r)), close.quantize(_INDEX_Q)))
             if out:
                 return out
         except MarketDataError:
