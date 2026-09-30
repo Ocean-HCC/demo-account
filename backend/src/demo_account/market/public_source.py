@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from ..core.instruments import SymbolError, parse_symbol
+from ..core.instruments import SymbolError, parse_symbol, split_symbol
 from ..core.money import D
 from ..core.rules import BEIJING
 from .base import CalendarData, CorporateAction, MarketDataError, Suspension
@@ -128,7 +128,6 @@ def parse_bonus_rows(rows: list[dict[str, Any]], symbol: str, since: date) -> li
                 bonus_per_share=bonus,
                 transfer_per_share=transfer,
                 cash_per_share=cash,
-                factor=None,
                 source="eastmoney",
             )
         )
@@ -233,7 +232,7 @@ class PublicSource:
         return parse_bonus_rows(rows, symbol, today - timedelta(days=DIVIDEND_LOOKBACK_DAYS))
 
     def index_daily(self, code: str, start: date, end: date) -> list[tuple[date, Decimal]]:
-        num, exchange = parse_symbol(code)
+        num, exchange = split_symbol(code)
         days = max((end - start).days + 10, 10)
         payload = self.sina.get_json(
             SINA_KLINE,

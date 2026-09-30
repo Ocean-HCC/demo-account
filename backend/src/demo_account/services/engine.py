@@ -14,7 +14,7 @@ from ..clock import Clock
 from ..config import Settings
 from ..core.matching import limit_can_fill, limit_hit, market_fill_price
 from ..core.models import Instrument, OrderStatus, OrderType, PriceLimits, Session, Side, Snapshot
-from ..core.money import tick_for
+from ..core.money import TICK
 from ..core.rules import T_0930, CalendarUnavailable, session_of, to_beijing
 from ..market.base import MarketDataError, QuoteSource
 from ..market.reference import ReferenceService
@@ -149,7 +149,7 @@ class Engine:
         if inst is None:
             return "waiting"
         limits = self._limits(order.symbol, today, inst, snap)
-        tick = tick_for(inst.asset_type)
+        tick = TICK
         with self.db.write() as tx:
             o = repos.get_order(tx, order.account_id, order.id)
             account = repos.get_account(tx, order.account_id)
@@ -237,7 +237,7 @@ class Engine:
                 stats["waiting"] += 1
                 continue
             limits = self._limits(order.symbol, today, inst, snap)
-            tick = tick_for(inst.asset_type)
+            tick = TICK
             with self.db.write() as tx:
                 o = repos.get_order(tx, order.account_id, order.id)
                 account = repos.get_account(tx, order.account_id)

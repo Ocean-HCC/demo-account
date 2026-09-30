@@ -12,7 +12,7 @@ import pytest
 from demo_account.clock import FakeClock
 from demo_account.core.matching import slippage_price
 from demo_account.core.models import OrderStatus, OrderType, Side
-from demo_account.core.money import TICK_ETF, TICK_STOCK, round_cent
+from demo_account.core.money import TICK, round_cent
 from demo_account.market.base import MarketDataError
 from demo_account.market.http import HttpSource
 from demo_account.market.public_source import (
@@ -24,7 +24,6 @@ from demo_account.market.public_source import (
 from demo_account.market.tsp_source import (
     TspClient,
     TspQuoteSource,
-    detect_factors,
     parse_daily_rows,
     parse_latest_row,
 )
@@ -36,8 +35,6 @@ from fake_upstream import (
     FakeUpstream,
     epoch_ms,
     month_rows,
-    stock_rows,
-    trading_days,
     upstream_for_day,
 )
 from support import THU, at, make_settings
@@ -195,8 +192,6 @@ def test_parse_latest_row() -> None:
     snap = parse_latest_row(PF, {"row": row}, THU, ts)
     assert snap is not None and snap.last == Decimal("9.02") and snap.ts == ts
     assert snap.prev_close == Decimal("9.00") and not snap.halted
-    etf = parse_latest_row("510300.SH", {"row": {**row, "close": 4.5155, "open": 4.5}}, THU, ts)
-    assert etf is not None and etf.last == Decimal("4.516") and etf.last.as_tuple().exponent == -3
     assert parse_latest_row(PF, {"row": {**row, "is_live": False}}, THU, ts) is None
     assert parse_latest_row(PF, {"row": {**row, "date": "2026-09-23"}}, THU, ts) is None
     assert parse_latest_row(PF, {"row": None}, THU, ts) is None
@@ -205,39 +200,35 @@ def test_parse_latest_row() -> None:
 
 
 def test_parse_daily_rows_restores_raw_prices_and_skips_live() -> None:
+    # 平安银行 2026-09-24 除息前后的形状：前复权价与未复权价在除息日之前不同
     rows = [
         {
             "date": "2026-09-23",
-            "open": 4.450,
-            "high": 4.470,
-            "low": 4.440,
-            "close": 4.4604,
-            "raw_close": 4.515,
-            "raw_high": 4.525,
-            "raw_low": 4.494,
+            "open": 11.20,
+            "high": 11.40,
+            "low": 11.10,
+            "close": 11.35,
+            "raw_close": 11.60,
+            "raw_high": 11.65,
+            "raw_low": 11.34,
         },
         {
             "date": "2026-09-24",
-            "open": 4.460,
-            "high": 4.480,
-            "low": 4.450,
-            "close": 4.470,
-            "raw_close": 4.470,
+            "open": 11.35,
+            "high": 11.47,
+            "low": 11.29,
+            "close": 11.30,
+            "raw_close": 11.30,
         },
-        {"date": "2026-09-28", "close": 4.5, "is_live": True},
+        {"date": "2026-09-28", "close": 11.30, "is_live": True},
     ]
-    bars = parse_daily_rows("510300.SH", rows, TICK_ETF)
+    bars = parse_daily_rows("000001.SZ", rows, TICK)
     assert [b.trade_date for b in bars] == [date(2026, 9, 23), date(2026, 9, 24)]
     b1, b2 = bars
-    assert b1.close == Decimal("4.515") and b1.high == Decimal("4.525")
-    assert b1.open == Decimal("4.504")  # 4.450 × 4.515 / 4.4604
-    assert b2.prev_close == Decimal("4.515") and b2.close == Decimal("4.470")
-    acts = detect_factors("510300.SH", bars)
-    assert len(acts) == 1 and acts[0].ex_date == date(2026, 9, 24)
-    assert acts[0].record_date == date(2026, 9, 23)
-    assert acts[0].factor == (Decimal("4.515") / Decimal("4.460400")).quantize(Decimal("0.000001"))
-    flat = parse_daily_rows(PF, stock_rows(date(2026, 9, 1), date(2026, 9, 10)), TICK_STOCK)
-    assert detect_factors(PF, flat) == []
+    assert b1.close == Decimal("11.60") and b1.high == Decimal("11.65")
+    assert b1.open == Decimal("11.45")  # 11.20 × 11.60 / 11.35
+    assert b1.adj_close == Decimal("11.35")
+    assert b2.prev_close == Decimal("11.60") and b2.close == Decimal("11.30")
 
 
 # ---------------------------------------------------------------- TSP 客户端行为
@@ -330,7 +321,7 @@ def test_trading_day_through_tsp_and_public_sources(tmp_path: Path) -> None:
     clock.set(at(THU, 9, 35, 3))
     assert c.engine.run_intraday_cycle()["filled"] == 1
     fill = repos.all_fills(c.db.read(), a.id)[0]
-    assert fill.price == slippage_price(Decimal("9.02"), Side.BUY, Decimal("0.0005"), TICK_STOCK)
+    assert fill.price == slippage_price(Decimal("9.02"), Side.BUY, Decimal("0.0005"), TICK)
     # 盘中注入的实时蜡烛不会被当成日线存下
     assert repos.get_bar(c.db.read(), PF, THU) is None
     # 收盘后 TSP 落盘当日日线与指数
@@ -355,74 +346,6 @@ def test_trading_day_through_tsp_and_public_sources(tmp_path: Path) -> None:
     assert c.settlement.reconcile(a.id)["ok"]
     assert repos.is_suspended(c.db.read(), "000016.SZ", THU)
     assert "/api/kline/minute" not in up.paths("127.0.0.1")
-
-
-def test_etf_factor_from_tsp_is_applied_at_settlement(tmp_path: Path) -> None:
-    up = _upstream_for_day()
-    etf = "510300.SH"
-    base = [
-        {
-            "date": d.isoformat(),
-            "open": 4.5,
-            "high": 4.52,
-            "low": 4.49,
-            "close": 4.515,
-            "raw_close": 4.515,
-        }
-        for d in trading_days(date(2026, 8, 1), date(2026, 9, 23))
-    ]
-    up.daily[etf] = base
-    up.latest[etf] = {
-        "date": "2026-09-24",
-        "open": 4.5,
-        "high": 4.52,
-        "low": 4.49,
-        "close": 4.515,
-        "change_pct": 0.0,
-        "is_live": True,
-    }
-    c, clock = _tsp_env(tmp_path, up, at(THU, 9, 35))  # type: ignore[misc]
-    a = c.accounts.create("ETF")
-    c.orders.submit(a.id, OrderRequest(etf, Side.BUY, OrderType.MARKET, qty=10000))
-    up.status["last_fetch_ms"] = epoch_ms(at(THU, 9, 35, 1))
-    clock.set(at(THU, 9, 35, 3))
-    assert c.engine.run_intraday_cycle()["filled"] == 1
-    up.daily[etf] = base + [
-        {
-            "date": "2026-09-24",
-            "open": 4.5,
-            "high": 4.52,
-            "low": 4.49,
-            "close": 4.515,
-            "raw_close": 4.515,
-        }
-    ]
-    up.index["000300.SH"].append({"date": "2026-09-24", "close": 4512.5})
-    clock.set(at(THU, 16, 0))
-    assert c.settlement.settle(THU).status == "done"
-    # 9 月 28 日除息：TSP 前复权后此前的 close 被整体下调，raw_close 不变
-    f = Decimal("1.01234")
-    up.daily[etf] = [
-        {**r, "close": float((Decimal(str(r["close"])) / f).quantize(Decimal("0.0001")))}
-        for r in up.daily[etf]
-    ] + [
-        {
-            "date": "2026-09-28",
-            "open": 4.46,
-            "high": 4.47,
-            "low": 4.45,
-            "close": 4.46,
-            "raw_close": 4.46,
-        }
-    ]
-    up.index["000300.SH"].append({"date": "2026-09-28", "close": 4520.0})
-    clock.set(at(date(2026, 9, 28), 16, 0))
-    assert c.settlement.settle(date(2026, 9, 28)).status == "done"
-    pos = repos.get_position(c.db.read(), a.id, etf)
-    acts = repos.corporate_actions_for(c.db.read(), etf)
-    assert acts and acts[-1].ex_date == date(2026, 9, 28) and acts[-1].source == "tsp-factor"
-    assert pos is not None and pos.qty == int(Decimal(10000) * acts[-1].factor)  # type: ignore[operator]
-    assert c.settlement.reconcile(a.id)["ok"]
 
 
 def test_clock_skew_blocks_orders(tmp_path: Path) -> None:

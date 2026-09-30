@@ -34,13 +34,8 @@ class AccountStatus(StrEnum):
     ARCHIVED = "archived"
 
 
-class AssetType(StrEnum):
-    STOCK = "stock"
-    ETF = "etf"
-
-
 class Board(StrEnum):
-    MAIN = "main"  # 主板，ETF 也按主板规则
+    MAIN = "main"  # 主板
     CHINEXT = "chinext"  # 创业板
     STAR = "star"  # 科创板
 
@@ -126,7 +121,6 @@ class PriceLimits:
 class Instrument:
     symbol: str
     name: str
-    asset_type: AssetType
     board: Board
     exchange: Exchange
     list_date: date | None

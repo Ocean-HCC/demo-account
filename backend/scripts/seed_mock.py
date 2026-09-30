@@ -64,7 +64,7 @@ def main() -> int:
     c.reference.ensure_calendar(start)
     c.reference.ensure_calendar(end)
     a = c.accounts.create("均线策略 A", note="均线金叉买入、死叉卖出（Mock 演示）")
-    b = c.accounts.create("动量策略 B", note="强势股轮动加沪深 300 ETF 底仓（Mock 演示）")
+    b = c.accounts.create("动量策略 B", note="强势股轮动加科创底仓（Mock 演示）")
 
     def order(
         acc: Account, sym: str, side: Side, qty: int, ot: OrderType = OrderType.MARKET, **kw: object
@@ -93,7 +93,7 @@ def main() -> int:
                 tags=["ma-cross"],
             )
         if i == 0:
-            order(b, "510300.SH", Side.BUY, 20000, note="ETF 底仓", tags=["base"])
+            order(b, "688981.SH", Side.BUY, 1000, note="科创底仓", tags=["base"])
         if i % 3 == 0:
             order(b, "300750.SZ", Side.BUY, 200, note="动量突破", tags=["momentum"])
         elif i % 3 == 2 and sellable(b, "300750.SZ"):

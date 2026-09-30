@@ -24,10 +24,10 @@ import httpx
 from . import __version__
 from .clock import Clock, FakeClock, SystemClock
 from .config import Settings
-from .core.instruments import guess_asset_type, parse_symbol
+from .core.instruments import SymbolError, parse_symbol
 from .core.matching import slippage_price
-from .core.models import AssetType, OrderStatus, OrderType, Session, Side
-from .core.money import D, round_cent, tick_for
+from .core.models import OrderStatus, OrderType, Session, Side
+from .core.money import TICK, D, round_cent
 from .core.rules import BEIJING, SimpleCalendar, session_of, to_beijing
 from .market.base import DailyBar, MarketDataError
 from .market.public_source import PublicSource
@@ -36,7 +36,6 @@ from .market.tsp_source import (
     TspQuoteSource,
     TspReferenceSource,
     close_final,
-    detect_factors,
     parse_daily_rows,
     parse_latest_row,
 )
@@ -45,7 +44,7 @@ from .services.orders import OrderRequest
 from .store import repos
 from .timeutil import iso, jsonable
 
-DEFAULT_SYMBOLS = ["600000.SH", "000001.SZ", "300750.SZ", "688981.SH", "510300.SH"]
+DEFAULT_SYMBOLS = ["600000.SH", "000001.SZ", "300750.SZ", "688981.SH"]
 PASS, WARN, FAIL, INFO, SKIP = "PASS", "WARN", "FAIL", "INFO", "SKIP"
 LABEL = {PASS: "通过", WARN: "注意", FAIL: "失败", INFO: "信息", SKIP: "跳过"}
 FRESH_MS = 180_000  # 与快照有效期一致
@@ -61,6 +60,14 @@ class Check:
     status: str
     detail: str
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def _is_stock(symbol: str) -> bool:
+    try:
+        parse_symbol(symbol)
+    except SymbolError:
+        return False
+    return True
 
 
 def _at(d: date, h: int, m: int, s: int = 0) -> datetime:
@@ -92,7 +99,9 @@ class Verifier:
         self.settings = replace(settings, market="tsp", scheduler_enabled=False)
         self.out = out_dir
         self.samples = out_dir / "samples"
-        self.symbols = symbols or list(DEFAULT_SYMBOLS)
+        requested = symbols or list(DEFAULT_SYMBOLS)
+        self.symbols = [s for s in requested if _is_stock(s)] or list(DEFAULT_SYMBOLS)
+        self.skipped = [s for s in requested if not _is_stock(s)]  # 只验证沪深 A 股股票
         self.transport = transport
         self.clock = clock or SystemClock()
         self.sleep = sleep
@@ -173,12 +182,6 @@ class Verifier:
             return today
         return self.calendar.prev_trading_day(today)
 
-    def stocks(self) -> list[str]:
-        return [s for s in self.symbols if guess_asset_type(s) is AssetType.STOCK]
-
-    def etfs(self) -> list[str]:
-        return [s for s in self.symbols if guess_asset_type(s) is AssetType.ETF]
-
     # ------------------------------------------------------------------ 主流程
 
     def run(self) -> list[Check]:
@@ -197,7 +200,6 @@ class Verifier:
             self._guard("T6", "标的信息", self.check_instruments)
             self._guard("T7", "日线与未复权价", self.check_daily)
             self._guard("T8", "沪深 300 指数", self.check_index)
-            self._guard("T9", "ETF 复权因子", self.check_factors)
         else:
             for cid, title in (
                 ("T3", "实时行情已开启"),
@@ -206,7 +208,6 @@ class Verifier:
                 ("T6", "标的信息"),
                 ("T7", "日线与未复权价"),
                 ("T8", "沪深 300 指数"),
-                ("T9", "ETF 复权因子"),
             ):
                 self.add(cid, title, SKIP, "TSP 不可用，跳过")
         self._guard("P1", "深交所交易日历", self.check_calendar)
@@ -235,13 +236,15 @@ class Verifier:
             "运行环境",
             INFO,
             f"demo-account {__version__}，Python {platform.python_version()}，"
-            f"{platform.system()} {platform.release()}",
+            f"{platform.system()} {platform.release()}"
+            + (f"；只验证沪深 A 股股票，已跳过 {self.skipped}" if self.skipped else ""),
             now_beijing=now,
             local_time=datetime.now().astimezone().isoformat(timespec="seconds"),
             tsp_base_url=self.settings.tsp_base_url,
             tsp_password_configured=bool(self.settings.tsp_password),
             http_trust_env=self.settings.http_trust_env,
             symbols=self.symbols,
+            skipped_symbols=self.skipped,
             python=sys.version.split()[0],
         )
 
@@ -366,7 +369,6 @@ class Verifier:
                 "实时行情已开启",
                 PASS,
                 f"模式 {s.get('mode')}，股票 {s.get('symbol_count')} 只，"
-                f"ETF {s.get('etf_symbol_count')} 只，"
                 f"轮询间隔 {s.get('interval_s')} 秒",
             )
 
@@ -419,12 +421,7 @@ class Verifier:
                 }
             )
         in_session = self.session() is Session.CONTINUOUS
-        bad_stocks = [
-            r["symbol"] for r in rows if not r["valid_snapshot"] and r["symbol"] in self.stocks()
-        ]
-        bad_etfs = [
-            r["symbol"] for r in rows if not r["valid_snapshot"] and r["symbol"] in self.etfs()
-        ]
+        bad_stocks = [r["symbol"] for r in rows if not r["valid_snapshot"]]
         if not in_session:
             ok = sum(1 for r in rows if r["valid_snapshot"])
             self.add(
@@ -442,39 +439,27 @@ class Verifier:
                 f"交易时段内这些股票没有有效快照：{bad_stocks}",
                 rows=rows,
             )
-        elif bad_etfs:
-            self.add(
-                "T5",
-                "最新行情快照",
-                WARN,
-                f"ETF 没有实时快照：{bad_etfs}。要交易 ETF 请在 TSP 开启 ETF 实时拉取",
-                rows=rows,
-            )
         else:
             self.add("T5", "最新行情快照", PASS, f"{len(rows)} 只全部取到当日实时快照", rows=rows)
 
     def check_instruments(self) -> None:
         found: list[dict[str, Any]] = []
         missing: list[str] = []
-        mismatch: list[str] = []
         for sym in self.symbols:
             code, _ = parse_symbol(sym)
             raw = self.client.get_json(
                 "/api/kline/instruments/search",
-                {"q": code, "limit": 20, "asset_types": "stock,etf"},
+                {"q": code, "limit": 20, "asset_types": "stock"},
             )
             self.save(f"tsp_search_{code}", raw)
             inst = self.ref.instrument(sym)
             if inst is None:
                 missing.append(sym)
                 continue
-            if inst.asset_type is not guess_asset_type(sym):
-                mismatch.append(sym)
             found.append(
                 {
                     "symbol": sym,
                     "name": inst.name,
-                    "asset_type": inst.asset_type,
                     "board": inst.board,
                     "is_st": inst.is_st,
                     "list_date_estimate": inst.list_date,
@@ -485,11 +470,9 @@ class Verifier:
                 "T6",
                 "标的信息",
                 FAIL,
-                f"TSP 标的列表里没有 {missing}，请在 TSP 同步股票与 ETF 列表",
+                f"TSP 标的列表里没有 {missing}，请在 TSP 同步股票列表",
                 found=found,
             )
-        elif mismatch:
-            self.add("T6", "标的信息", WARN, f"资产类型与代码规律不符：{mismatch}", found=found)
         else:
             self.add(
                 "T6",
@@ -523,7 +506,7 @@ class Verifier:
             rows = rows if isinstance(rows, list) else []
             final_rows = [r for r in rows if not r.get("is_live")]
             has_raw = bool(final_rows) and all("raw_close" in r for r in final_rows)
-            bars = parse_daily_rows(sym, rows, tick_for(guess_asset_type(sym)), live_day)
+            bars = parse_daily_rows(sym, rows, TICK, live_day)
             self.bars[sym] = bars
             last = bars[-1].trade_date if bars else None
             results.append(
@@ -546,9 +529,6 @@ class Verifier:
                 worst = FAIL
                 behind = True
                 notes.append(f"{sym} 日线只到 {last}，应有 {expected}")
-            if not has_raw and guess_asset_type(sym) is AssetType.ETF:
-                worst = FAIL if worst == FAIL else WARN
-                notes.append(f"{sym} 缺少未复权价 raw_close，无法识别 ETF 除权除息")
         if behind and expected == now.date() and live_day is None:
             s = self.status or {}
             notes.append(
@@ -598,24 +578,6 @@ class Verifier:
                 "TSP 没有沪深 300 日线，结算会改用新浪（见 P4）。可在 TSP 同步指数列表",
             )
 
-    def check_factors(self) -> None:
-        etfs = self.etfs()
-        if not etfs:
-            self.add("T9", "ETF 复权因子", SKIP, "验证标的里没有 ETF")
-            return
-        found: list[dict[str, Any]] = []
-        for sym in etfs:
-            for a in detect_factors(sym, self.bars.get(sym, [])):
-                found.append({"symbol": sym, "ex_date": a.ex_date, "factor": a.factor})
-        if found:
-            self.add(
-                "T9", "ETF 复权因子", INFO, f"近 45 天识别到除权除息 {len(found)} 次", factors=found
-            )
-        else:
-            self.add(
-                "T9", "ETF 复权因子", INFO, "近 45 天未识别到 ETF 除权除息（没有发生时属正常）"
-            )
-
     # ------------------------------------------------------------------ 公开接口
 
     def check_calendar(self) -> None:
@@ -656,7 +618,7 @@ class Verifier:
 
     def check_dividends(self) -> None:
         today = self.now().date()
-        sym = self.stocks()[0] if self.stocks() else "600000.SH"
+        sym = self.symbols[0]
         acts = self.public.stock_corporate_actions(sym, today)
         self.save("eastmoney_dividends", [jsonable(a.__dict__) for a in acts])
         desc = "；".join(
@@ -718,8 +680,7 @@ class Verifier:
     def check_history_flow(self) -> None:
         assert self.calendar is not None
         d = self.last_completed_day()  # 交易日 16:00 后即当天，覆盖当日结算的取数
-        stock = self.stocks()[0] if self.stocks() else "600000.SH"
-        etf = self.etfs()[0] if self.etfs() else None
+        stock = self.symbols[0]
         fake = FakeClock(_at(d, 10, 0))
         c, tmp = self._temp_container(fake)
         c.clock_monitor.threshold = (
@@ -733,17 +694,8 @@ class Verifier:
             o1 = c.orders.submit(
                 a.id, OrderRequest(stock, Side.BUY, OrderType.CLOSE, qty=100, note="验证收盘单")
             )
-            o2 = None
-            if etf:
-                o2 = c.orders.submit(
-                    a.id,
-                    OrderRequest(etf, Side.BUY, OrderType.CLOSE, qty=1000, note="验证 ETF 收盘单"),
-                )
             rej = c.orders.submit(a.id, OrderRequest(stock, Side.SELL, OrderType.MARKET, qty=100))
-            steps.append(
-                f"{d} 10:00 开户并提交收盘单：{stock} {o1.status.value}"
-                + (f"，{etf} {o2.status.value}" if o2 else "")
-            )
+            steps.append(f"{d} 10:00 开户并提交收盘单：{stock} {o1.status.value}")
             if o1.status is not OrderStatus.PENDING:
                 problems.append(f"收盘单未进入等待：{o1.reason_code} {o1.reason}")
             if rej.reason_code != "INSUFFICIENT_SELLABLE":
@@ -760,7 +712,7 @@ class Verifier:
                 raise _Stop
             steps.append(f"{d} 16:00 结算完成")
             ex = c.db.read()
-            for order in (o for o in (o1, o2) if o is not None):
+            for order in (o1,):
                 got = repos.get_order(ex, a.id, order.id)
                 assert got is not None
                 bar = next((b for b in self.bars.get(order.symbol, []) if b.trade_date == d), None)
@@ -868,7 +820,7 @@ class Verifier:
         if not self.realtime_ok:
             self.add("F2", "盘中即时单", SKIP, "TSP 实时行情未开启，跳过")
             return
-        stock = self.stocks()[0] if self.stocks() else "600000.SH"
+        stock = self.symbols[0]
         c, tmp = self._temp_container(self.clock)
         steps: list[str] = []
         problems: list[str] = []
@@ -910,9 +862,7 @@ class Verifier:
                 if e.type.value == "order_filled" and e.order_id == mo.id
             )
             last = D(str(ev.basis["snapshot"]["last"]))
-            expect = slippage_price(
-                last, Side.BUY, a.fee_params.slippage_rate, tick_for(guess_asset_type(stock))
-            )
+            expect = slippage_price(last, Side.BUY, a.fee_params.slippage_rate, TICK)
             limits = (ev.basis.get("up_limit"), ev.basis.get("down_limit"))
             if fill.price != expect and str(limits[0]) != str(fill.price):
                 problems.append(f"成交价 {fill.price} 与快照 {last} 加滑点的 {expect} 不一致")

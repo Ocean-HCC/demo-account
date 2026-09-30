@@ -28,7 +28,6 @@ def _inst_dict(inst: Any) -> dict[str, Any]:
         {
             "symbol": inst.symbol,
             "name": inst.name,
-            "asset_type": inst.asset_type,
             "board": inst.board,
             "exchange": inst.exchange,
             "list_date": inst.list_date,

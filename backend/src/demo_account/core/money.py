@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
-from .models import AssetType
-
 ZERO = Decimal("0")
 ONE = Decimal("1")
 CENT = Decimal("0.01")
-TICK_STOCK = Decimal("0.01")
-TICK_ETF = Decimal("0.001")
+TICK = Decimal("0.01")  # 股票申报价格最小变动单位（需求跨角色规则 1.4）
 
 
 def D(value: Decimal | int | str | float) -> Decimal:  # noqa: N802
@@ -25,11 +22,6 @@ def D(value: Decimal | int | str | float) -> Decimal:  # noqa: N802
 def round_cent(value: Decimal | int | str) -> Decimal:
     """金额按分四舍五入（half-up）。"""
     return D(value).quantize(CENT, rounding=ROUND_HALF_UP)
-
-
-def tick_for(asset_type: AssetType) -> Decimal:
-    """申报价格最小变动单位：股票 0.01 元，ETF 0.001 元。"""
-    return TICK_ETF if asset_type is AssetType.ETF else TICK_STOCK
 
 
 def round_to_tick(

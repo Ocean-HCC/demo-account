@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ver.add_argument(
         "--symbols",
-        help="逗号分隔的验证标的，默认 600000.SH,000001.SZ,300750.SZ,688981.SH,510300.SH",
+        help="逗号分隔的验证标的，默认 600000.SH,000001.SZ,300750.SZ,688981.SH",
     )
     ver.add_argument("--no-e2e", action="store_true", help="只检查接口与数据，不跑完整流程")
     ver.add_argument("--keep-db", action="store_true", help="保留流程验证用的临时数据库")

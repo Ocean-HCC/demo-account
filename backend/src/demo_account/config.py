@@ -29,7 +29,6 @@ class Settings:
     snapshot_interval: int
     snapshot_max_age: int
     settle_time: time
-    etf_20pct: frozenset[str]
     instant_order_timeout: int
     max_defer_days: int
     default_initial_cash: Decimal
@@ -52,9 +51,6 @@ class Settings:
             return default if v is None or v == "" else v
 
         hh, mm = get("DEMO_ACCOUNT_SETTLE_TIME", "16:00").split(":")
-        etf_20 = frozenset(
-            s.strip() for s in get("DEMO_ACCOUNT_ETF_20PCT", "").split(",") if s.strip()
-        )
         dist = e.get("DEMO_ACCOUNT_FRONTEND_DIST")
         return cls(
             db_path=Path(get("DEMO_ACCOUNT_DB_PATH", "data/demo_account.sqlite3")),
@@ -68,7 +64,6 @@ class Settings:
             snapshot_interval=int(get("DEMO_ACCOUNT_SNAPSHOT_INTERVAL", "60")),
             snapshot_max_age=int(get("DEMO_ACCOUNT_SNAPSHOT_MAX_AGE", "180")),
             settle_time=time(int(hh), int(mm)),
-            etf_20pct=etf_20,
             instant_order_timeout=int(get("DEMO_ACCOUNT_INSTANT_ORDER_TIMEOUT", "180")),
             max_defer_days=int(get("DEMO_ACCOUNT_MAX_DEFER_DAYS", "3")),
             default_initial_cash=Decimal(get("DEMO_ACCOUNT_DEFAULT_INITIAL_CASH", "1000000")),

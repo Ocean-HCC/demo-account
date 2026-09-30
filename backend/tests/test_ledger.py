@@ -6,7 +6,7 @@ import pytest
 
 from demo_account.core.fees import compute_fees
 from demo_account.core.ledger import LedgerError, apply_fill, new_state, replay, unlock_t1
-from demo_account.core.models import AssetType, FeeParams, Fill, FillKind, Side
+from demo_account.core.models import FeeParams, Fill, FillKind, Side
 from demo_account.core.money import ZERO, round_cent
 from demo_account.core.rules import BEIJING
 
@@ -24,10 +24,9 @@ def trade(
     qty: int,
     price: str,
     d: date,
-    asset_type: AssetType = AssetType.STOCK,
 ) -> Fill:
     gross = round_cent(Decimal(qty) * Decimal(price))
-    fees = compute_fees(gross, side, asset_type, FP)
+    fees = compute_fees(gross, side, FP)
     cash_delta = -(gross + fees.total) if side is Side.BUY else gross - fees.total
     return Fill(
         seq=seq,
@@ -112,7 +111,7 @@ def test_next_day_unlocks_and_partial_sell_reduces_cost_proportionally() -> None
     assert pos.today_bought_qty == 0
     assert pos.cost_total == Decimal("9005.09") - round_cent(Decimal("9005.09") * 400 / 1000)
     sell_gross = Decimal("3800.00")
-    sell_fees = compute_fees(sell_gross, Side.SELL, AssetType.STOCK, FP).total
+    sell_fees = compute_fees(sell_gross, Side.SELL, FP).total
     assert state.cash == Decimal("100000") - Decimal("9005.09") + sell_gross - sell_fees
 
 
@@ -191,7 +190,7 @@ def test_reversal_explicit_deltas() -> None:
 def test_random_sequences_keep_invariants() -> None:
     """随机成交序列：现金等于初始资金加全部现金变动之和，数量等于买卖差，成本非负。"""
     rng = random.Random(20260928)
-    symbols = ["600000.SH", "000001.SZ", "300750.SZ", "510300.SH"]
+    symbols = ["600000.SH", "000001.SZ", "300750.SZ", "688981.SH"]
     for _ in range(50):
         fills: list[Fill] = []
         held: dict[str, int] = dict.fromkeys(symbols, 0)
@@ -199,15 +198,14 @@ def test_random_sequences_keep_invariants() -> None:
         for day in (D1, D2, D3):
             for _ in range(rng.randint(1, 8)):
                 sym = rng.choice(symbols)
-                asset = AssetType.ETF if sym == "510300.SH" else AssetType.STOCK
                 price = f"{rng.uniform(3, 60):.2f}"
                 if held[sym] > 0 and rng.random() < 0.4:
                     qty = rng.randint(1, held[sym])
-                    fills.append(trade(seq := seq + 1, sym, Side.SELL, qty, price, day, asset))
+                    fills.append(trade(seq := seq + 1, sym, Side.SELL, qty, price, day))
                     held[sym] -= qty
                 else:
                     qty = rng.randint(1, 20) * 100
-                    fills.append(trade(seq := seq + 1, sym, Side.BUY, qty, price, day, asset))
+                    fills.append(trade(seq := seq + 1, sym, Side.BUY, qty, price, day))
                     held[sym] += qty
         state = replay(Decimal("1000000"), fills)
         assert state.cash == Decimal("1000000") + sum((f.cash_delta for f in fills), ZERO)

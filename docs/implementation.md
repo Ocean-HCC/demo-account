@@ -1,6 +1,6 @@
 # 实现
 
-本文档说明已确认的方案在技术上怎样落地：运行形态、架构、模块划分、数据模型、公共接口、关键技术流程、外部依赖的调用策略和工程保障。项目级技术选型已于 2026-09-24 至 2026-09-28 由发起者确认：后端 Python + FastAPI，存储 SQLite 单文件，控制台 React + TypeScript + Vite + Ant Design + ECharts；行情主源是发起者本机运行的 tick-stock-panel（下称 TSP），TSP 没有的交易日历、停复牌和股票分红送转明细用免费公开接口补，ETF 的除权除息用 TSP 的复权因子处理。2026-09-29 按 TSP 所在机器的接入验证结果修订了当日日线的取法（3.2 TSP 适配器）和结算补跑（5.4 日终结算、5.6 调度与时钟）。其余由 AI 做出的重要选择集中列在 8.5 AI 自行决定的选择。
+本文档说明已确认的方案在技术上怎样落地：运行形态、架构、模块划分、数据模型、公共接口、关键技术流程、外部依赖的调用策略和工程保障。项目级技术选型已于 2026-09-24 至 2026-09-28 由发起者确认：后端 Python + FastAPI，存储 SQLite 单文件，控制台 React + TypeScript + Vite + Ant Design + ECharts；行情主源是发起者本机运行的 tick-stock-panel（下称 TSP），TSP 没有的交易日历、停复牌和股票分红送转明细用免费公开接口补。2026-09-29 按 TSP 所在机器的接入验证结果修订了当日日线的取法（3.2 TSP 适配器）和结算补跑（5.4 日终结算、5.6 调度与时钟），同日按意图去掉 ETF（2.2 标的与交易规则、4.4 迁移）。其余由 AI 做出的重要选择集中列在 8.5 AI 自行决定的选择。
 
 目录
 
@@ -123,16 +123,16 @@ demo-account/
 ### 2.1 金额与精度
 
 - 价格、金额、费率一律用 `Decimal`；禁止 `float` 参与任何金额计算。外部数据源给的浮点价格在适配器边界转成 `Decimal` 并按最小变动单位取整。
-- 最小变动单位：股票 0.01 元，ETF 0.001 元；金额精确到分。
+- 最小变动单位 0.01 元；金额精确到分。
 - 取整：费用和金额按分四舍五入（half-up）；滑点后的成交价按最小变动单位向不利方向取整（买入向上、卖出向下）；涨跌停价按最小变动单位 half-up，与交易所一致。
 - 数量为整数股。
 
 ### 2.2 标的与交易规则
 
-- **代码格式**：`600000.SH`、`000001.SZ`、`510300.SH`，与 TSP 一致。`.BJ` 一律拒绝。
-- **资产类型**：stock 或 etf，来自参考数据（3.4 参考数据缓存与日历服务）。
-- **板块**：`688`、`689` 开头为科创板；`300`、`301` 开头为创业板；其余沪深股票为主板；ETF 按主板规则，20% 幅度的 ETF 通过配置清单指定。
-- **申报数量**：主板、创业板、ETF 买入 100 股整数倍；科创板买入不少于 200 股、超过部分 1 股递增；卖出允许零股一次卖出；单笔上限按需求跨角色规则 1.3 申报数量。
+- **代码格式**：`600000.SH`、`000001.SZ`，与 TSP 一致。
+- **标的范围**：只支持沪深 A 股股票。`parse_symbol` 只放行沪市 `6` 开头、深市 `00` 与 `30` 开头的代码，ETF、LOF 等基金，B 股、债券、指数与 `.BJ` 一律按不支持拒绝；指数代码只在基准取数时用 `split_symbol` 拆分，不做这项检查。
+- **板块**：`688`、`689` 开头为科创板；`300`、`301` 开头为创业板；其余为主板。
+- **申报数量**：主板、创业板买入 100 股整数倍；科创板买入不少于 200 股、超过部分 1 股递增；卖出允许零股一次卖出；单笔上限按需求跨角色规则 1.3 申报数量。
 - **涨跌幅**：主板 10%（含风险警示股），创业板与科创板 20%；新股上市前 5 个交易日不设限（按上市日与交易日历计算交易日序号）。涨跌停价优先取参考数据中的行情源值，缺失时按公式计算。
 - **风险警示股**：名称含 ST 或 *ST；`st_order_allowed(order_type, has_protect_price)` 只允许限价单和带保护限价的收盘单；`st_daily_buy_cap = 500000` 股。
 - **交易时段**：`session_of(now, is_trading_day)` 返回 pre_open、opening_auction（9:15 至 9:25）、continuous（9:30 至 11:30、13:00 至 14:57）、lunch、closing_auction（14:57 至 15:00）、after_hours（15:05 至 15:30）、closed。
@@ -146,8 +146,8 @@ demo-account/
 - `limit_can_fill(last, limit_price, side)`：限价单是否触及。
 - `limit_hit(ref_price, side, up_limit, down_limit)`：是否触及涨跌停导致拒绝。
 - `close_fill(close, side, protect_price)`：收盘单是否成交（保护限价判定），成交价为收盘价。
-- `freeze_amount(qty, freeze_price, fee_params, asset_type)`：冻结金额，含按冻结价估算的费用。
-- `amount_to_qty(amount, freeze_price, board, asset_type)`：按金额折算数量。
+- `freeze_amount(qty, freeze_price, fee_params)`：冻结金额，含按冻结价估算的费用。
+- `amount_to_qty(amount, freeze_price, board, fee_params)`：按金额折算数量。
 
 ### 2.4 台账重放
 
@@ -181,14 +181,14 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 | 市场状态与快照时间 | `GET /api/intraday/status` | 每个周期取一次；`realtime_allowed` 或 `enabled` 为假时视为源不可用；`is_polling_window` 为真而 `last_fetch_ms` 早于 10 分钟时视为行情停滞，本轮失败 |
 | 快照（最新价、今开、最高、最低） | `GET /api/kline/daily/latest?symbol=` | 逐标的调用；`row.is_live` 为真且 `row.date` 等于今天才算有效；`ts` 取 `last_fetch_ms`；前收盘价由 `change_pct` 反推，仅用于展示 |
 | 前收盘价、涨跌停价 | 不调用 TSP | 前收盘价取自已缓存的日线；涨跌停价按 2.2 标的与交易规则计算。TSP 的分时接口在缓存未命中时会向其上游拉数，避免占用 TSP 的行情额度 |
-| 日线（收盘、开盘、复权） | `GET /api/kline/daily?symbol=&start_date=&end_date=` | `raw_close` 为未复权收盘价用于结算与估值；`close` 为前复权价，两者比值用于 ETF 复权因子；开盘、最高、最低价按比值还原；带 `is_live` 标记的行按下文「当日日线」处理 |
+| 日线（收盘、开盘、复权） | `GET /api/kline/daily?symbol=&start_date=&end_date=` | `raw_close` 为未复权收盘价用于结算与估值；`close` 为前复权价，开盘、最高、最低价按两者比值还原；带 `is_live` 标记的行按下文「当日日线」处理 |
 | 指数日线（沪深 300） | `GET /api/index/daily?symbol=000300.SH&start_date=&end_date=` | 取 `close`，`is_live` 行同样按「当日日线」处理；无数据时用 3.3 的新浪兜底 |
-| 标的信息 | `GET /api/kline/instruments/search?q=<代码>&asset_types=stock,etf` | 取代码完全匹配的一条；名称判 ST；`asset_type` 判 stock 或 etf。TSP 不提供上市日：近 40 个自然日内日线不超过 5 根时，以首根日线日期作为上市日估计 |
+| 标的信息 | `GET /api/kline/instruments/search?q=<代码>&asset_types=stock` | 取代码完全匹配、资产类型为股票的一条；名称判 ST。TSP 不提供上市日：近 40 个自然日内日线不超过 5 根时，以首根日线日期作为上市日估计 |
 
 - **当日日线**：北京时间当天 24:00 之前，TSP 一直把当日行标为 `is_live`，即使已经收盘、已经落盘，也会先用内存中的实时值覆盖再返回。因此只在 TSP 行情状态为收盘定版时，才把当日行当作当日日线：`market_phase` 为 `close_final`，`final_sync_done` 为真，`final_sync_failed` 为空（TSP 已取得 15:00 之后的快照）。此时收盘价取已落盘的 `raw_close`，缺失时取 `close`；当日是前复权的锚点，复权价视同未复权价。其余情况的 `is_live` 行一律丢弃，TSP 定版失败的那天也不例外：要等 24:00 以后 TSP 返回落盘行才能结算，其间按方案 4.4 日终结算暂停交易。只有响应里出现当日 `is_live` 行时，才读取 `/api/intraday/status`。
 - **停牌判断**：TSP 会把停牌标的从当日快照中剔除，因此"市场开市但该标的无当日有效快照"视为无行情；是否停牌由 3.3 的停复牌名单决定。
 - **鉴权**：TSP 未设密码时本机直接访问；设了密码则用 `DEMO_ACCOUNT_TSP_PASSWORD` 调 `POST /api/auth/login` 取 `tf_session` cookie，收到 401 或 403 时重新登录一次。
-- **运行前提**（写入 README）：TSP 已配置能提供实时行情的数据源；交易 ETF 时需在 TSP 开启 ETF 实时与日线拉取（偏好 `realtime_pull_etf`、`pipeline_pull_etf`）；TSP 已同步指数列表。
+- **运行前提**（写入 README）：TSP 已配置能提供实时行情的数据源；TSP 已同步指数列表。
 - **失败处理**：请求失败或超时本轮跳过，连续失败超过 5 次置源为不可用并告警；不可用期间不撮合即时单与限价单（超时规则照常），健康接口显示状态。
 
 ### 3.3 公开接口适配器
@@ -206,8 +206,6 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 ### 3.4 参考数据缓存与日历服务
 
 参考数据落到 store 的 trading_calendar、instruments、daily_bars、suspensions、corporate_actions、benchmark_daily 表，services 只读缓存不直连数据源。`CalendarService` 提供 `is_trading_day`、`next_trading_day`、`prev_trading_day`、`trading_day_rank(list_date, date)`；日历未覆盖目标日期时抛出明确错误，调用方按方案 8.4 告警。
-
-**ETF 复权因子**：TSP 适配器对 ETF 取近 20 个自然日的日线，比较相邻两个交易日的 `raw_close / close` 比值，比值变化不小于 0.1% 即视为后一日发生除权除息（更小的变化视为前复权价的取整噪声），因子 f = 前一日比值 / 当日比值，作为来源为 tsp-factor 的公司行动写入 corporate_actions；结算时数量按 f 调整并向下取整，不足 1 份的部分按当日收盘价折成现金入账，总成本不变。TSP 没有复权因子来源时比值恒为 1，无法识别 ETF 除权除息，结算时对持有 ETF 的账户写一条告警。
 
 ### 3.5 Mock 源
 
@@ -238,11 +236,11 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 | nav_daily | account_id, trade_date, cash, market_value, total_assets, nav, day_pnl, benchmark_nav, finalized_at | 每日定版净值 |
 | events | account_id, seq, type, occurred_at, order_id, fill_seq, trade_date, symbol, basis, summary, payload, notify, delivered_at, attempts, next_attempt_at；主键 (account_id, seq) | 账户事件序列，兼做通知投递队列；basis 为当时依据的 JSON |
 | settlement_runs | trade_date, status, started_at, finished_at, error | 结算幂等与状态 |
-| instruments | symbol, name, asset_type, board, exchange, list_date, is_st, updated_at | 参考数据 |
+| instruments | symbol, name, board, exchange, list_date, is_st, updated_at | 参考数据 |
 | trading_calendar | cal_date, is_open, source | 交易日历 |
 | daily_bars | symbol, trade_date, open, high, low, close, adj_close, prev_close, volume, up_limit, down_limit | 日线：close 为未复权收盘价，adj_close 为 TSP 前复权价 |
 | suspensions | symbol, trade_date, reason, source | 当日停牌名单 |
-| corporate_actions | symbol, ex_date, record_date, pay_date, bonus_per_share, transfer_per_share, cash_per_share, factor, source, applied_at | 股票分红送转明细与 ETF 因子 |
+| corporate_actions | symbol, ex_date, record_date, pay_date, bonus_per_share, transfer_per_share, cash_per_share, source, applied_at | 股票分红送转明细 |
 | benchmark_daily | index_code, trade_date, close, source | 基准指数 |
 | alerts | id, level, code, message, trade_date, created_at, resolved_at | 告警 |
 
@@ -258,7 +256,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 
 ### 4.4 迁移
 
-`store/migrations/NNN_name.sql` 按序号执行，`PRAGMA user_version` 记录已应用版本，启动时自动迁移；只允许新增迁移，不修改已发布的迁移文件。
+`store/migrations/NNN_name.sql` 按序号执行，`PRAGMA user_version` 记录已应用版本，启动时自动迁移；只允许新增迁移，不修改已发布的迁移文件。`002_drop_etf.sql` 在去掉 ETF 后删除已缓存的 ETF 标的与 ETF 因子记录，并删掉 instruments.asset_type 与 corporate_actions.factor 两列。
 
 ---
 
@@ -282,7 +280,7 @@ TSP 是行情主源，只读它的本地缓存接口，不触发它向上游拉�
 
 ### 5.4 日终结算
 
-`settle(trade_date)`：检查 settlement_runs 防重复；拉取当日日线、指数、公司行动与停牌数据，缺失则写 failed 与告警后返回；然后对每个非归档账户在一个事务内执行方案 4.4 的步骤：撮合收盘单（含保护限价判定与 15:00 仍停牌的顺延）、失效过期订单、公司行动（股票按 corporate_actions 明细，ETF 按 3.4 的因子）、T+1 解锁、净值定版、回合统计缓存，每一步写事件；全部账户完成后写 done 并写结算完成事件。顺延不单独产生事件：每个账户当日的收盘单成交、订单失效、订单顺延与公司行动汇总写入该账户结算完成事件的 payload（filled、expired、rejected、deferred、corporate_actions）。送转与分红的应得数量按登记日（缺失时取除权日前一交易日）为止的台账重放确定，不足 1 股的部分按除权日收盘价折成现金。结算后调用 `reconcile(account_id)` 用 2.4 台账重放核对持仓与现金，不一致写告警。
+`settle(trade_date)`：检查 settlement_runs 防重复；拉取当日日线、指数、公司行动与停牌数据，缺失则写 failed 与告警后返回；然后对每个非归档账户在一个事务内执行方案 4.4 的步骤：撮合收盘单（含保护限价判定与 15:00 仍停牌的顺延）、失效过期订单、公司行动（按 corporate_actions 的分红送转明细）、T+1 解锁、净值定版、回合统计缓存，每一步写事件；全部账户完成后写 done 并写结算完成事件。顺延不单独产生事件：每个账户当日的收盘单成交、订单失效、订单顺延与公司行动汇总写入该账户结算完成事件的 payload（filled、expired、rejected、deferred、corporate_actions）。送转与分红的应得数量按登记日（缺失时取除权日前一交易日）为止的台账重放确定，不足 1 股的部分按除权日收盘价折成现金。结算后调用 `reconcile(account_id)` 用 2.4 台账重放核对持仓与现金，不一致写告警。
 
 **待结算日与补跑**：`pending_days()` 按日期顺序列出上次 done 之后已过结算时间、但还没结算完成的交易日；还没有 done 记录时，从最早的账户创建日算起。列表不为空时暂停交易，落实方案 4.4 日终结算：下单返回 `SETTLEMENT_CATCHUP`（503），消息写明最早的待结算日；盘中撮合只刷新快照，不处理订单；开盘撮合跳过。预估、撤单和查询不受影响。`catch_up()` 按日期顺序逐日调用 `settle`，某一天失败就停下。`settle(d)` 发现 d 之前还有待结算日时拒绝执行（`SETTLEMENT_CATCHUP`，409），所以手动结算也只能按日期顺序进行。服务启动时和调度循环都会调用 `catch_up()`（见 5.6 调度与时钟）。结算失败的告警按交易日和原因去重：同一交易日同一原因已有未解决的告警时，不再重复写入。
 
@@ -373,9 +371,9 @@ Webhook 请求：`POST webhook_url`，JSON 体 `{event_id, account_id, seq, type
 
 ### 8.1 测试
 
-- core：每条金融规则一组用例，覆盖方案 7.2 规则与 8. 异常与边界：申报数量与单笔上限、价格精度、涨跌停价、新股无涨跌停、费用（最低佣金、印花税单向、ETF 免税）、滑点方向与取整、冻结金额、按金额折算、保护限价判定、风险警示股订单类型与日买入上限、时段与所属交易日、FIFO 回合、回撤、年化。
+- core：每条金融规则一组用例，覆盖方案 7.2 规则与 8. 异常与边界：申报数量与单笔上限、价格精度、涨跌停价、新股无涨跌停、费用（最低佣金、印花税单向）、滑点方向与取整、冻结金额、按金额折算、保护限价判定、风险警示股订单类型与日买入上限、时段与所属交易日、FIFO 回合、回撤、年化。
 - 台账性质测试：随机生成成交序列，`replay` 的结果必须等于逐笔更新的 positions 与现金。
-- services：用 FakeClock 与 Mock 源驱动完整交易日：下单、盘中撮合、开盘撮合、限价触及、收盘单与保护限价、除权除息（股票明细与 ETF 因子）、T+1 解锁、净值定版、重复结算幂等、补跑、结算失败跨日时暂停交易并按序补结算、冻结撤单、幂等键、事件序列完整性（每个账务变更恰有一条事件）。
+- services：用 FakeClock 与 Mock 源驱动完整交易日：下单、盘中撮合、开盘撮合、限价触及、收盘单与保护限价、除权除息（分红送转明细）、T+1 解锁、净值定版、重复结算幂等、补跑、结算失败跨日时暂停交易并按序补结算、冻结撤单、幂等键、事件序列完整性（每个账务变更恰有一条事件）。
 - market：TSP 与公开接口适配器用录制的响应样本做解析测试，TSP 样本包括 TSP 所在机器的真实响应（从 `verify-output/samples` 复制到 `tests/fixtures/` 固定下来，例如收盘定版后仍带 `is_live` 的当日行）；字段缺失时必须报错而不是猜测。真实公开接口测试默认跳过，设置 `DEMO_ACCOUNT_LIVE_TESTS=1` 时运行。
 - 接入验证：`demo-account verify-tsp` 在 TSP 所在机器上运行，检查 TSP 连通与鉴权、实时行情、标的、日线与未复权价、指数、公开接口与本机时钟。日线检查取不到最近一个已收盘交易日的日线时判失败。之后在临时库里用这一天的真实数据跑通开户、收盘单、结算与核对；交易日 16:00 以后，这一天就是当天，因此也覆盖了当日结算的取数。交易时段内再验证即时单成交。结果写入 report.md、report.json 与 samples/，不含密码。它自身用模拟上游测试覆盖交易时段、收盘后、TSP 不可用与需要密码几种情形。
 - api：FastAPI TestClient 覆盖每个接口的成功与错误码。
@@ -398,7 +396,6 @@ Webhook 请求：`POST webhook_url`，JSON 体 `{event_id, account_id, seq, type
 | DEMO_ACCOUNT_INSTANT_ORDER_TIMEOUT | 即时单等待行情上限秒数 | 180 |
 | DEMO_ACCOUNT_MAX_DEFER_DAYS | 开盘单、收盘单停牌最多顺延的交易日数 | 3 |
 | DEMO_ACCOUNT_SETTLE_TIME | 日终结算时间 | 16:00 |
-| DEMO_ACCOUNT_ETF_20PCT | 20% 涨跌幅的 ETF 代码清单 | 空 |
 | DEMO_ACCOUNT_BENCHMARK | 基准指数 | 000300.SH |
 | DEMO_ACCOUNT_DEFAULT_INITIAL_CASH、DEMO_ACCOUNT_MIN_INITIAL_CASH | 新账户默认初始资金、最低初始资金 | 1000000、10000 |
 | DEMO_ACCOUNT_DEFAULT_COMMISSION_RATE、DEMO_ACCOUNT_DEFAULT_MIN_COMMISSION | 新账户默认佣金率、最低佣金 | 0.00013、5 |
@@ -441,12 +438,10 @@ cd ../backend && uv sync && uv run demo-account serve
 | HTTP 客户端默认不读系统代理 | 本机代理拦截部分行情主机，直连可用 |
 | 事件表兼做通知投递队列 | 留痕与通知是同一条序列，少一份需要核对的状态 |
 | 冻结不建表，由等待中订单汇总 | 台账保持唯一事实源 |
-| TSP 快照逐标的读取 `daily/latest`，不用全市场快照接口 | 有等待单或持仓的标的很少，逐标的读取覆盖 ETF 且都是本地缓存 |
-| ETF 因子调整向下取整、零头折现 | 保证份额为整数且净值连续 |
+| TSP 快照逐标的读取 `daily/latest`，不用全市场快照接口 | 有等待单或持仓的标的很少，逐标的读取的都是本地缓存 |
 | 沪深 300 在 TSP 无数据时用新浪兜底 | 基准不是成交价，允许第二来源 |
 | 订单号带时间前缀，账户号短随机 | 可读、可排序，无需额外依赖 |
 | 端口 8770 | 避开 TSP 的 3018、3011 与兄弟项目的 8765 |
-| 20% 涨跌幅 ETF 用配置清单 | 数据源不区分 ETF 跟踪板块，清单最可靠 |
 | 校验阶段被拒的订单落库，同时以错误响应返回 | 调用方按 HTTP 状态判断成败，又能拿到订单号复盘 |
 | 下单与撮合时先在写事务外取行情与基础数据 | 网络请求不占用写锁 |
 | 限价单在最新价封板（买遇涨停、卖遇跌停）时继续等待 | 落实方案 4.2 中限价单遇涨跌停继续等待、开板后才有机会成交 |
@@ -456,6 +451,7 @@ cd ../backend && uv sync && uv run demo-account serve
 | 收盘定版后的当日行，收盘价优先取落盘的 `raw_close` | TSP 盘后管道会按官方日线校正落盘值，比内存里的实时值可靠 |
 | 结算失败后每 10 分钟重试 | 结算未完成期间暂停交易，间隔短能更快恢复；告警已去重，不会刷屏 |
 | 暂停交易期间盘中撮合仍刷新快照 | 方案 8.3 要求盘中估值仍然可看 |
+| 去掉 ETF 时连同资产类型概念一起删除，代码按前缀放行股票 | 只剩股票后资产类型没有用处；按前缀放行也顺带挡住了 B 股、债券和指数代码 |
 | 暂停交易由待结算日实时推导，不设进程内开关 | 状态只来自 settlement_runs 与日历，重启、手动结算和调度都不会让它过时 |
 
 ### 8.6 里程碑

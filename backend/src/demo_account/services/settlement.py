@@ -318,13 +318,12 @@ class SettlementService:
         now: datetime,
         summary: dict[str, list[dict[str, Any]]],
     ) -> None:
-        # 股份变动在除权日：股票按送转明细，ETF 按因子
+        # 股份变动在除权日：按送转明细
         for act in repos.corporate_actions_on(tx, d):
             ratio = act.bonus_per_share + act.transfer_per_share
-            if act.factor is None and ratio <= 0:
+            if ratio <= 0:
                 continue
-            tag = "factor" if act.factor is not None else "bonus"
-            marker = f"{tag}:{act.symbol}:{act.ex_date.isoformat()}"
+            marker = f"bonus:{act.symbol}:{act.ex_date.isoformat()}"
             if repos.corporate_fill_exists(tx, a.id, marker):
                 continue
             entitled = self._entitled(tx, a, act, ctx.cal)
@@ -332,18 +331,12 @@ class SettlementService:
                 continue
             bar = ctx.bars.get(act.symbol)
             close = bar.close if bar is not None else ZERO
-            if act.factor is not None:
-                exact = D(entitled) * act.factor
-                new_qty = int(exact)
-                delta = new_qty - entitled
-            else:
-                exact = D(entitled) * (1 + ratio)
-                new_qty = int(exact)
-                delta = new_qty - entitled
+            exact = D(entitled) * (1 + ratio)
+            new_qty = int(exact)
+            delta = new_qty - entitled
             frac_cash = round_cent((exact - new_qty) * close)
-            side = Side.BUY if delta >= 0 else Side.SELL
             fill = self._corporate_fill(
-                tx, a, act.symbol, side, abs(delta), frac_cash, d, now, marker
+                tx, a, act.symbol, Side.BUY, delta, frac_cash, d, now, marker
             )
             basis = {
                 "entitled_qty": entitled,
@@ -351,7 +344,6 @@ class SettlementService:
                 "ex_date": act.ex_date,
                 "bonus_per_share": act.bonus_per_share,
                 "transfer_per_share": act.transfer_per_share,
-                "factor": act.factor,
                 "close": close,
                 "fraction_cash": frac_cash,
                 "source": act.source,
@@ -369,7 +361,7 @@ class SettlementService:
                 payload={"fill": repos.fill_to_dict(fill)},
             )
             summary["corporate_actions"].append(
-                {"symbol": act.symbol, "kind": tag, "qty_delta": delta}
+                {"symbol": act.symbol, "kind": "bonus", "qty_delta": delta}
             )
         # 现金分红在派息日（派息日为空时按除权日）
         for act in repos.corporate_actions_paying(tx, d):

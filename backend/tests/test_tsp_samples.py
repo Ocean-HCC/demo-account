@@ -15,13 +15,12 @@ from typing import Any
 import httpx
 
 from demo_account.clock import FakeClock
-from demo_account.core.money import TICK_ETF, TICK_STOCK
+from demo_account.core.money import TICK
 from demo_account.market.public_source import PublicSource
 from demo_account.market.tsp_source import (
     TspClient,
     TspReferenceSource,
     close_final,
-    detect_factors,
     parse_daily_rows,
     parse_latest_row,
 )
@@ -29,7 +28,6 @@ from support import MON, THU, at
 
 SAMPLES = Path(__file__).resolve().parent / "fixtures" / "tsp_2026-09-28"
 PF = "600000.SH"
-ETF = "510300.SH"
 NOSLEEP = lambda s: None  # noqa: E731
 
 
@@ -42,7 +40,7 @@ def sample(name: str) -> Any:
 
 def source(status: dict[str, Any]) -> TspReferenceSource:
     """真实样本作上游：日线与指数原样返回，行情状态可替换。"""
-    daily = {s: sample(f"tsp_daily_{s}") for s in (PF, ETF)}
+    daily = {PF: sample(f"tsp_daily_{PF}")}
     index = sample("tsp_index_daily")
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -74,8 +72,8 @@ def test_today_row_stays_live_after_close_final() -> None:
     today = [r for r in rows if r["date"] == "2026-09-28"]
     assert len(today) == 1 and today[0]["is_live"] is True
     assert "raw_close" in today[0]  # 落盘行被实时值覆盖后返回
-    assert parse_daily_rows(PF, rows, TICK_STOCK)[-1].trade_date == THU
-    last = parse_daily_rows(PF, rows, TICK_STOCK, MON)[-1]
+    assert parse_daily_rows(PF, rows, TICK)[-1].trade_date == THU
+    last = parse_daily_rows(PF, rows, TICK, MON)[-1]
     assert (last.trade_date, last.close, last.adj_close) == (MON, Decimal("9.16"), Decimal("9.16"))
     assert last.prev_close == Decimal("9.00")
     assert last.low is not None and last.high is not None and last.low <= last.close <= last.high
@@ -87,19 +85,9 @@ def test_reference_source_takes_today_only_after_final_sync() -> None:
     assert [(b.trade_date, b.close) for b in ok.daily_bars(PF, MON, MON)] == [
         (MON, Decimal("9.16"))
     ]
-    assert [(b.trade_date, b.close) for b in ok.daily_bars(ETF, MON, MON)] == [
-        (MON, Decimal("4.417"))
-    ]
     assert ok.index_daily("000300.SH", THU, MON)[-1] == (MON, Decimal("4340.755"))
     for bad in ({"final_sync_done": False}, {"final_sync_failed": "unconfirmed_snapshot"}):
         assert source({**status, **bad}).daily_bars(PF, MON, MON) == []
-
-
-def test_final_today_row_adds_no_spurious_etf_factor() -> None:
-    rows = sample(f"tsp_daily_{ETF}")["rows"]
-    bars = parse_daily_rows(ETF, rows, TICK_ETF, MON)
-    assert bars[-1].trade_date == MON and detect_factors(ETF, bars) == []
-    assert source(sample("tsp_intraday_status")).corporate_actions(ETF) == []
 
 
 def test_latest_sample_is_a_valid_snapshot() -> None:

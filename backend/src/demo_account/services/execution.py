@@ -77,7 +77,7 @@ class Execution:
         basis: dict[str, Any],
     ) -> Fill | None:
         gross = round_cent(D(order.qty) * price)
-        fees = compute_fees(gross, order.side, inst.asset_type, account.fee_params)
+        fees = compute_fees(gross, order.side, account.fee_params)
         if order.side is Side.BUY:
             cash = repos.account_cash(tx, account.id, account.initial_cash)
             others = repos.frozen_cash_total(tx, account.id, exclude_order_id=order.id)

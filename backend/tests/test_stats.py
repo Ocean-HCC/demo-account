@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from demo_account.core.fees import compute_fees
-from demo_account.core.models import AssetType, FeeParams, Fill, FillKind, Side
+from demo_account.core.models import FeeParams, Fill, FillKind, Side
 from demo_account.core.money import ZERO, round_cent
 from demo_account.core.rules import BEIJING, SimpleCalendar
 from demo_account.core.stats import compute_stats, fifo_rounds, max_drawdown
@@ -13,7 +13,7 @@ D1, D2, D3 = date(2026, 9, 24), date(2026, 9, 25), date(2026, 9, 28)
 
 def trade(seq: int, side: Side, qty: int, price: str, d: date, symbol: str = "600000.SH") -> Fill:
     gross = round_cent(Decimal(qty) * Decimal(price))
-    fees = compute_fees(gross, side, AssetType.STOCK, FP)
+    fees = compute_fees(gross, side, FP)
     return Fill(
         seq=seq,
         account_id="acc",
@@ -74,9 +74,7 @@ def test_fifo_rounds_split_across_batches(calendar: SimpleCalendar) -> None:
     # 第一批成本 1000 + 5 + 0.01；第二批 1200 + 5 + 0.01 的一半
     assert r1.cost == Decimal("1005.01")
     assert r2.cost == round_cent(Decimal("1205.01") * 50 / 100)
-    sell_net = (
-        Decimal("1950.00") - compute_fees(Decimal("1950.00"), Side.SELL, AssetType.STOCK, FP).total
-    )
+    sell_net = Decimal("1950.00") - compute_fees(Decimal("1950.00"), Side.SELL, FP).total
     assert r1.proceeds + r2.proceeds == round_cent(sell_net * 100 / 150) + round_cent(
         sell_net * 50 / 150
     )

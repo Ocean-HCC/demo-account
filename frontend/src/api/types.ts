@@ -210,7 +210,6 @@ export interface Snapshot {
 export interface Instrument {
   symbol: string;
   name: string;
-  asset_type: 'stock' | 'etf';
   board: string;
   exchange: string;
   list_date: string | null;

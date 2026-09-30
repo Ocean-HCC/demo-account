@@ -13,30 +13,49 @@ from demo_account.core.instruments import (
     parse_symbol,
     price_limits,
     round_lot_down,
+    split_symbol,
     st_order_allowed,
     validate_qty,
 )
-from demo_account.core.models import AssetType, Board, Exchange, OrderType, Side
-from demo_account.core.money import TICK_ETF, TICK_STOCK
+from demo_account.core.models import Board, Exchange, OrderType, Side
+from demo_account.core.money import TICK
 
 
 def test_parse_symbol() -> None:
     assert parse_symbol("600000.SH") == ("600000", Exchange.SH)
     assert parse_symbol("000001.SZ") == ("000001", Exchange.SZ)
+    assert parse_symbol("300750.SZ") == ("300750", Exchange.SZ)
+    assert parse_symbol("688981.SH") == ("688981", Exchange.SH)
     for bad in ("600000", "sh600000", "600000.sh", "430047.BJ", "920519.BJ", "60000.SH"):
         with pytest.raises(SymbolError):
             parse_symbol(bad)
 
 
+def test_parse_symbol_rejects_non_stock_codes() -> None:
+    # ETF、LOF、B 股、债券、指数都不在范围内（意图 3 交付范围；方案 8.1 标的不支持）
+    for bad in (
+        "510300.SH",  # 沪市 ETF
+        "588000.SH",  # 科创板 ETF
+        "159915.SZ",  # 深市 ETF
+        "161005.SZ",  # LOF
+        "900901.SH",  # 沪市 B 股
+        "200002.SZ",  # 深市 B 股
+        "113050.SH",  # 可转债
+        "000300.SH",  # 沪深 300 指数
+        "399001.SZ",  # 深证成指
+    ):
+        with pytest.raises(SymbolError):
+            parse_symbol(bad)
+    assert split_symbol("000300.SH") == ("000300", Exchange.SH)  # 基准取数只拆分不检查
+
+
 def test_board_of() -> None:
-    assert board_of("600000.SH", AssetType.STOCK) is Board.MAIN
-    assert board_of("000001.SZ", AssetType.STOCK) is Board.MAIN
-    assert board_of("300750.SZ", AssetType.STOCK) is Board.CHINEXT
-    assert board_of("301001.SZ", AssetType.STOCK) is Board.CHINEXT
-    assert board_of("688981.SH", AssetType.STOCK) is Board.STAR
-    assert board_of("689009.SH", AssetType.STOCK) is Board.STAR
-    assert board_of("588000.SH", AssetType.ETF) is Board.MAIN
-    assert board_of("510300.SH", AssetType.ETF) is Board.MAIN
+    assert board_of("600000.SH") is Board.MAIN
+    assert board_of("000001.SZ") is Board.MAIN
+    assert board_of("300750.SZ") is Board.CHINEXT
+    assert board_of("301001.SZ") is Board.CHINEXT
+    assert board_of("688981.SH") is Board.STAR
+    assert board_of("689009.SH") is Board.STAR
 
 
 def test_is_st() -> None:
@@ -48,11 +67,9 @@ def test_is_st() -> None:
 
 
 def test_limit_rate() -> None:
-    assert limit_rate(Board.MAIN, AssetType.STOCK) == Decimal("0.10")
-    assert limit_rate(Board.CHINEXT, AssetType.STOCK) == Decimal("0.20")
-    assert limit_rate(Board.STAR, AssetType.STOCK) == Decimal("0.20")
-    assert limit_rate(Board.MAIN, AssetType.ETF) == Decimal("0.10")
-    assert limit_rate(Board.MAIN, AssetType.ETF, etf_20pct=True) == Decimal("0.20")
+    assert limit_rate(Board.MAIN) == Decimal("0.10")
+    assert limit_rate(Board.CHINEXT) == Decimal("0.20")
+    assert limit_rate(Board.STAR) == Decimal("0.20")
 
 
 def test_new_listing_no_limit() -> None:
@@ -64,24 +81,22 @@ def test_new_listing_no_limit() -> None:
 
 def test_price_limits_main_board_matches_exchange() -> None:
     # 浦发银行 2026-09-24 前收 8.98，交易所公布涨停 9.88、跌停 8.08
-    lim = price_limits(Decimal("8.98"), Decimal("0.10"), TICK_STOCK)
+    lim = price_limits(Decimal("8.98"), Decimal("0.10"), TICK)
     assert lim.up == Decimal("9.88")
     assert lim.down == Decimal("8.08")
 
 
-def test_price_limits_20pct_and_etf() -> None:
-    lim = price_limits(Decimal("100"), Decimal("0.20"), TICK_STOCK)
+def test_price_limits_20pct() -> None:
+    lim = price_limits(Decimal("100"), Decimal("0.20"), TICK)
     assert (lim.up, lim.down) == (Decimal("120.00"), Decimal("80.00"))
-    lim = price_limits(Decimal("4.578"), Decimal("0.10"), TICK_ETF)
-    assert (lim.up, lim.down) == (Decimal("5.036"), Decimal("4.120"))
 
 
 def test_price_limits_tiny_price_rules() -> None:
     # 差额不足一个最小变动单位时按一个单位；下限不低于一个单位
-    lim = price_limits(Decimal("0.05"), Decimal("0.10"), TICK_STOCK)
+    lim = price_limits(Decimal("0.05"), Decimal("0.10"), TICK)
     assert lim.up == Decimal("0.06")
     assert lim.down == Decimal("0.04")
-    lim = price_limits(Decimal("0.01"), Decimal("0.10"), TICK_STOCK)
+    lim = price_limits(Decimal("0.01"), Decimal("0.10"), TICK)
     assert lim.up == Decimal("0.02")
     assert lim.down == Decimal("0.01")
 

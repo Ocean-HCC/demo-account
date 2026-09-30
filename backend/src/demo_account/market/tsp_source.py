@@ -17,16 +17,15 @@ import httpx
 
 from ..clock import Clock
 from ..config import Settings
-from ..core.instruments import board_of, guess_asset_type, is_st, parse_symbol
-from ..core.models import AssetType, Instrument, PriceLimits, Snapshot
-from ..core.money import D, round_to_tick, tick_for
+from ..core.instruments import board_of, is_st, parse_symbol
+from ..core.models import Instrument, PriceLimits, Snapshot
+from ..core.money import TICK, D, round_to_tick
 from ..core.rules import BEIJING
 from .base import CalendarData, CorporateAction, DailyBar, MarketDataError, Suspension
 from .http import HttpSource
 from .public_source import PublicSource
 
 TSP_STALE_SECONDS = 600  # TSP 报告正在轮询但最近抓取时间早于 10 分钟，视为行情停滞
-FACTOR_TOLERANCE = Decimal("0.001")  # 复权比值变化小于 0.1% 视为取整噪声
 NEW_LISTING_MAX_ROWS = 5
 _ADJ_Q = Decimal("0.000001")
 _INDEX_Q = Decimal("0.001")
@@ -60,7 +59,7 @@ def parse_latest_row(symbol: str, payload: Any, today: date, ts: datetime) -> Sn
         return None
     if not row.get("is_live") or str(row.get("date"))[:10] != today.isoformat():
         return None
-    tick = tick_for(guess_asset_type(symbol))
+    tick = TICK
     last = _price(row.get("close"), tick)
     if last is None:
         return None
@@ -165,34 +164,6 @@ def parse_daily_rows(
     return bars
 
 
-def detect_factors(symbol: str, bars: Sequence[DailyBar]) -> list[CorporateAction]:
-    """ETF 除权除息：相邻两日 raw/adj 比值之比即当日因子 f（实现 3.4），数量按 f 调整。"""
-    out = []
-    for prev, cur in zip(bars, bars[1:], strict=False):
-        if not prev.adj_close or not cur.adj_close:
-            continue
-        r_prev = prev.close / prev.adj_close
-        r_cur = cur.close / cur.adj_close
-        if r_cur <= 0:
-            continue
-        f = r_prev / r_cur
-        if abs(f - 1) >= FACTOR_TOLERANCE:
-            out.append(
-                CorporateAction(
-                    symbol=symbol,
-                    ex_date=cur.trade_date,
-                    record_date=prev.trade_date,
-                    pay_date=None,
-                    bonus_per_share=Decimal("0"),
-                    transfer_per_share=Decimal("0"),
-                    cash_per_share=Decimal("0"),
-                    factor=f.quantize(_ADJ_Q),
-                    source="tsp-factor",
-                )
-            )
-    return out
-
-
 # ---------------------------------------------------------------- 客户端
 
 
@@ -283,7 +254,6 @@ class TspQuoteSource:
             "quote_age_ms",
             "last_fetch_ms",
             "symbol_count",
-            "etf_symbol_count",
         )
         return {"name": self.name, "base_url": self.client.base, **{k: s.get(k) for k in keys}}
 
@@ -305,27 +275,32 @@ class TspReferenceSource:
     def instrument(self, symbol: str) -> Instrument | None:
         code, exchange = parse_symbol(symbol)
         payload = self.client.get_json(
-            "/api/kline/instruments/search", {"q": code, "limit": 20, "asset_types": "stock,etf"}
+            "/api/kline/instruments/search", {"q": code, "limit": 20, "asset_types": "stock"}
         )
         results = payload.get("results") if isinstance(payload, dict) else None
         if not isinstance(results, list):
             raise MarketDataError("TSP 标的搜索返回结构不符")
-        hit = next((r for r in results if r.get("symbol") == symbol), None)
+        hit = next(
+            (
+                r
+                for r in results
+                if r.get("symbol") == symbol and r.get("asset_type", "stock") == "stock"
+            ),
+            None,
+        )
         if hit is None:
             return None
-        asset_type = AssetType.ETF if hit.get("asset_type") == "etf" else AssetType.STOCK
         name = str(hit.get("name") or "")
         return Instrument(
             symbol=symbol,
             name=name,
-            asset_type=asset_type,
-            board=board_of(symbol, asset_type),
+            board=board_of(symbol),
             exchange=exchange,
-            list_date=self._estimate_list_date(symbol, asset_type),
-            is_st=asset_type is AssetType.STOCK and is_st(name),
+            list_date=self._estimate_list_date(symbol),
+            is_st=is_st(name),
         )
 
-    def _estimate_list_date(self, symbol: str, asset_type: AssetType) -> date | None:
+    def _estimate_list_date(self, symbol: str) -> date | None:
         """TSP 不提供上市日：近 40 个自然日内日线不超过 5 根时，以首根日线日期作为上市日估计。"""
         today = self.clock.now().date()
         bars = self.daily_bars(symbol, today - timedelta(days=40), today)
@@ -346,8 +321,7 @@ class TspReferenceSource:
             {"symbol": symbol, "start_date": start.isoformat(), "end_date": end.isoformat()},
         )
         rows = payload.get("rows") if isinstance(payload, dict) else None
-        tick = tick_for(guess_asset_type(symbol))
-        bars = parse_daily_rows(symbol, rows, tick, self.final_live_date(rows))
+        bars = parse_daily_rows(symbol, rows, TICK, self.final_live_date(rows))
         return [b for b in bars if start <= b.trade_date <= end]
 
     def price_limits(self, symbol: str, d: date) -> PriceLimits | None:
@@ -357,12 +331,7 @@ class TspReferenceSource:
         return self.public.suspensions(d)
 
     def corporate_actions(self, symbol: str) -> list[CorporateAction]:
-        today = self.clock.now().date()
-        if guess_asset_type(symbol) is AssetType.ETF:
-            return detect_factors(
-                symbol, self.daily_bars(symbol, today - timedelta(days=20), today)
-            )
-        return self.public.stock_corporate_actions(symbol, today)
+        return self.public.stock_corporate_actions(symbol, self.clock.now().date())
 
     def index_daily(self, code: str, start: date, end: date) -> list[tuple[date, Decimal]]:
         try:

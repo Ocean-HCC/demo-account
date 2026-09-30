@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from .fees import compute_fees
 from .instruments import round_lot_down
-from .models import AssetType, Board, FeeParams, PriceLimits, Side
+from .models import Board, FeeParams, PriceLimits, Side
 from .money import D, round_cent, round_down_to_tick, round_up_to_tick
 
 
@@ -60,11 +60,10 @@ def freeze_amount(
     qty: int,
     freeze_price: Decimal,
     fee_params: FeeParams,
-    asset_type: AssetType,
 ) -> Decimal:
     """买单冻结金额 = 数量 × 冻结价 + 按冻结价估算的买入费用。"""
     gross = round_cent(D(qty) * freeze_price)
-    fees = compute_fees(gross, Side.BUY, asset_type, fee_params)
+    fees = compute_fees(gross, Side.BUY, fee_params)
     return gross + fees.total
 
 
@@ -72,7 +71,6 @@ def amount_to_qty(
     amount: Decimal,
     freeze_price: Decimal,
     board: Board,
-    asset_type: AssetType,
     fee_params: FeeParams,
 ) -> int:
     """按金额买入：在冻结价下，冻结金额不超过给定金额的最大合规数量；不足最小申报数量返回 0。"""
@@ -80,6 +78,6 @@ def amount_to_qty(
         return 0
     qty = round_lot_down(int(amount // freeze_price), board)
     step = 1 if board is Board.STAR else 100
-    while qty > 0 and freeze_amount(qty, freeze_price, fee_params, asset_type) > amount:
+    while qty > 0 and freeze_amount(qty, freeze_price, fee_params) > amount:
         qty = round_lot_down(qty - step, board)
     return qty

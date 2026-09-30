@@ -11,7 +11,7 @@ from ..clock import Clock
 from ..config import Settings
 from ..core.instruments import limit_rate, new_listing_no_limit, price_limits
 from ..core.models import Instrument, PriceLimits
-from ..core.money import tick_for
+from ..core.money import TICK
 from ..core.rules import CalendarUnavailable, SimpleCalendar
 from ..store import repos
 from ..store.db import Database
@@ -214,8 +214,7 @@ class ReferenceService:
             pc = self.reference_prev_close(symbol, d, today)
             if pc is None:
                 raise MarketDataError(f"缺少前收盘价: {symbol} {d}")
-            rate = limit_rate(inst.board, inst.asset_type, symbol in self.settings.etf_20pct)
-            result = price_limits(pc, rate, tick_for(inst.asset_type))
+            result = price_limits(pc, limit_rate(inst.board), TICK)
         if d <= today:
             self._limits[key] = result
         return result

@@ -33,7 +33,7 @@ from ..core.models import (
     Session,
     Side,
 )
-from ..core.money import ZERO, is_on_tick, round_cent, round_to_tick, tick_for
+from ..core.money import TICK, ZERO, is_on_tick, round_cent, round_to_tick
 from ..core.rules import CalendarUnavailable, assign_trade_date, can_submit, session_of
 from ..market.base import MarketDataError
 from ..market.reference import ReferenceService
@@ -332,7 +332,7 @@ class OrderService:
                 "OUTSIDE_SESSION", f"即时市价单只能在连续竞价时段提交，当前为{SESSION_CN[session]}"
             )
         # 4. 数量与价格
-        tick = tick_for(inst.asset_type)
+        tick = TICK
         for label, price in (("限价", req.limit_price), ("保护限价", req.protect_price)):
             if price is None:
                 continue
@@ -348,9 +348,7 @@ class OrderService:
         freeze_price = _freeze_price(req, limits, m.prev_close, tick)
         basis["freeze_price"] = freeze_price
         if req.amount is not None:
-            qty = amount_to_qty(
-                req.amount, freeze_price, inst.board, inst.asset_type, account.fee_params
-            )
+            qty = amount_to_qty(req.amount, freeze_price, inst.board, account.fee_params)
             if qty <= 0:
                 return reject("LOT_SIZE", "按金额折算后不足最小申报数量")
         position = repos.get_position(ex, account.id, req.symbol)
@@ -368,7 +366,7 @@ class OrderService:
                 return reject("ST_DAILY_BUY_LIMIT", "当日累计买入该风险警示股将超过 50 万股")
         # 5. 资金或可卖数量
         if req.side is Side.BUY:
-            need = freeze_amount(qty, freeze_price, account.fee_params, inst.asset_type)
+            need = freeze_amount(qty, freeze_price, account.fee_params)
             cash = repos.account_cash(ex, account.id, account.initial_cash)
             available = cash - repos.frozen_cash_total(ex, account.id)
             basis["available_cash"] = available
@@ -393,7 +391,7 @@ class OrderService:
         )
         basis["sellable_qty"] = sellable
         gross = _gross(qty, freeze_price)
-        fees = compute_fees(gross, Side.SELL, inst.asset_type, account.fee_params).total
+        fees = compute_fees(gross, Side.SELL, account.fee_params).total
         if qty > sellable:
             return Checked(
                 False,

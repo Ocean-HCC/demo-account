@@ -11,7 +11,6 @@ from typing import Any
 
 from ..core.models import (
     AccountStatus,
-    AssetType,
     Board,
     EventType,
     Exchange,
@@ -701,7 +700,6 @@ def _row_instrument(r: sqlite3.Row) -> Instrument:
     return Instrument(
         symbol=r["symbol"],
         name=r["name"],
-        asset_type=AssetType(r["asset_type"]),
         board=Board(r["board"]),
         exchange=Exchange(r["exchange"]),
         list_date=s2d(r["list_date"]) if r["list_date"] else None,
@@ -716,15 +714,14 @@ def get_instrument(ex: Executor, symbol: str) -> Instrument | None:
 
 def upsert_instrument(ex: Executor, inst: Instrument, at: datetime) -> None:
     ex.execute(
-        "INSERT INTO instruments (symbol, name, asset_type, board, exchange, list_date, is_st,"
-        " updated_at) VALUES (?,?,?,?,?,?,?,?)"
+        "INSERT INTO instruments (symbol, name, board, exchange, list_date, is_st,"
+        " updated_at) VALUES (?,?,?,?,?,?,?)"
         " ON CONFLICT(symbol) DO UPDATE SET name=excluded.name,"
-        " asset_type=excluded.asset_type, board=excluded.board, exchange=excluded.exchange,"
+        " board=excluded.board, exchange=excluded.exchange,"
         " list_date=excluded.list_date, is_st=excluded.is_st, updated_at=excluded.updated_at",
         (
             inst.symbol,
             inst.name,
-            inst.asset_type.value,
             inst.board.value,
             inst.exchange.value,
             d2s(inst.list_date) if inst.list_date else None,
@@ -886,7 +883,6 @@ def _row_action(r: sqlite3.Row) -> CorporateAction:
         bonus_per_share=dec0(r["bonus_per_share"]),
         transfer_per_share=dec0(r["transfer_per_share"]),
         cash_per_share=dec0(r["cash_per_share"]),
-        factor=dec(r["factor"]),
         source=r["source"],
     )
 
@@ -894,11 +890,11 @@ def _row_action(r: sqlite3.Row) -> CorporateAction:
 def upsert_corporate_action(ex: Executor, a: CorporateAction) -> None:
     ex.execute(
         "INSERT INTO corporate_actions (symbol, ex_date, record_date, pay_date, bonus_per_share,"
-        " transfer_per_share, cash_per_share, factor, source) VALUES (?,?,?,?,?,?,?,?,?)"
+        " transfer_per_share, cash_per_share, source) VALUES (?,?,?,?,?,?,?,?)"
         " ON CONFLICT(symbol, ex_date) DO UPDATE SET record_date=excluded.record_date,"
         " pay_date=excluded.pay_date, bonus_per_share=excluded.bonus_per_share,"
         " transfer_per_share=excluded.transfer_per_share, cash_per_share=excluded.cash_per_share,"
-        " factor=excluded.factor, source=excluded.source",
+        " source=excluded.source",
         (
             a.symbol,
             d2s(a.ex_date),
@@ -907,7 +903,6 @@ def upsert_corporate_action(ex: Executor, a: CorporateAction) -> None:
             str(a.bonus_per_share),
             str(a.transfer_per_share),
             str(a.cash_per_share),
-            sdec(a.factor),
             a.source,
         ),
     )

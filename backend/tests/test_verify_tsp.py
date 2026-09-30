@@ -3,40 +3,19 @@
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
 from demo_account.clock import FakeClock
 from demo_account.verify_tsp import Check, Verifier
-from fake_upstream import FakeUpstream, trading_days, upstream_for_day
+from fake_upstream import FakeUpstream, upstream_for_day
 from support import THU, at, make_settings
 
-SYMS = ["600000.SH", "510300.SH"]
+SYMS = ["600000.SH"]
 NOSLEEP = lambda s: None  # noqa: E731
 
 
 def full_upstream(clock: FakeClock) -> FakeUpstream:
     up = upstream_for_day()
-    up.daily["510300.SH"] = [
-        {
-            "date": d.isoformat(),
-            "open": 4.5,
-            "high": 4.52,
-            "low": 4.49,
-            "close": 4.515,
-            "raw_close": 4.515,
-        }
-        for d in trading_days(date(2026, 8, 1), date(2026, 9, 23))
-    ]
-    up.latest["510300.SH"] = {
-        "date": "2026-09-24",
-        "open": 4.5,
-        "high": 4.52,
-        "low": 4.49,
-        "close": 4.52,
-        "change_pct": 0.001,
-        "is_live": True,
-    }
     up.sina_index = [{"day": "2026-09-23", "close": "4517.279"}]
     up.live_clock = clock
     return up
@@ -59,17 +38,6 @@ def after_close_upstream(clock: FakeClock, final_sync_done: bool = True) -> Fake
             "is_live": True,
         }
     ]
-    up.daily["510300.SH"].append(
-        {
-            "date": "2026-09-24",
-            "open": 4.5,
-            "high": 4.53,
-            "low": 4.49,
-            "close": 4.52,
-            "raw_close": 4.52,
-            "is_live": True,
-        }
-    )
     up.index["000300.SH"].append({"date": "2026-09-24", "close": 4439.144})
     up.status.update(
         {
@@ -115,7 +83,7 @@ def test_all_checks_pass_during_session(tmp_path: Path) -> None:
     for name in (
         "tsp_intraday_status",
         "tsp_latest_600000.SH",
-        "tsp_daily_510300.SH",
+        "tsp_daily_600000.SH",
         "flow_history",
         "flow_live",
     ):
@@ -130,7 +98,7 @@ def test_after_close_settles_today_from_final_live_rows(tmp_path: Path) -> None:
     assert "收盘定版" in checks["T7"].detail
     f1 = checks["F1"]
     assert f1.status == "PASS", f1.detail
-    assert "用 2026-09-24 的真实数据" in f1.detail and "9.05" in f1.detail and "4.52" in f1.detail
+    assert "用 2026-09-24 的真实数据" in f1.detail and "9.05" in f1.detail
     assert checks["F2"].status == "SKIP"
 
 
@@ -140,6 +108,24 @@ def test_after_close_without_final_sync_fails(tmp_path: Path) -> None:
     t7 = checks["T7"]
     assert t7.status == "FAIL" and "应有 2026-09-24" in t7.detail and "尚未收盘定版" in t7.detail
     assert checks["F1"].status == "FAIL" and "收盘价" in checks["F1"].detail
+
+
+def test_non_stock_symbols_are_skipped(tmp_path: Path) -> None:
+    clock = FakeClock(at(THU, 9, 35))
+    settings = make_settings(tmp_path, DEMO_ACCOUNT_MARKET="tsp")
+    v = Verifier(
+        settings,
+        tmp_path / "out",
+        symbols=["600000.SH", "510300.SH"],
+        transport=full_upstream(clock).transport(),
+        clock=clock,
+        sleep=NOSLEEP,
+        wait=lambda s: clock.advance(s),
+        run_e2e=False,
+    )
+    checks = {c.id: c for c in v.run()}
+    assert v.symbols == ["600000.SH"] and "510300.SH" in checks["E1"].detail
+    assert "T9" not in checks and checks["T6"].status == "PASS"
 
 
 def test_stale_daily_bars_fail(tmp_path: Path) -> None:

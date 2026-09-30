@@ -23,7 +23,7 @@ class DailyBar:
     high: Decimal | None
     low: Decimal | None
     close: Decimal  # 未复权收盘价
-    adj_close: Decimal | None  # 数据源的前复权收盘价，用于识别 ETF 除权除息
+    adj_close: Decimal | None  # 数据源的前复权收盘价
     prev_close: Decimal | None
     volume: int | None
     up_limit: Decimal | None
@@ -45,7 +45,6 @@ class CorporateAction:
     bonus_per_share: Decimal  # 每股送股
     transfer_per_share: Decimal  # 每股转股
     cash_per_share: Decimal  # 每股税前派现
-    factor: Decimal | None  # ETF 因子，数量按 factor 调整
     source: str
 
 

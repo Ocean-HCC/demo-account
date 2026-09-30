@@ -1,16 +1,13 @@
 from decimal import Decimal
 
-from demo_account.core.models import AssetType
 from demo_account.core.money import (
-    TICK_ETF,
-    TICK_STOCK,
+    TICK,
     D,
     is_on_tick,
     round_cent,
     round_down_to_tick,
     round_to_tick,
     round_up_to_tick,
-    tick_for,
 )
 
 
@@ -28,28 +25,21 @@ def test_round_cent_half_up() -> None:
     assert round_cent("12.345") == Decimal("12.35")
 
 
-def test_tick_for_asset_type() -> None:
-    assert tick_for(AssetType.STOCK) == TICK_STOCK
-    assert tick_for(AssetType.ETF) == TICK_ETF
+def test_tick_is_one_cent() -> None:
+    assert Decimal("0.01") == TICK
 
 
 def test_round_to_tick_directions() -> None:
-    assert round_to_tick(Decimal("9.005"), TICK_STOCK) == Decimal("9.01")
-    assert round_to_tick(Decimal("9.004"), TICK_STOCK) == Decimal("9.00")
-    assert round_up_to_tick(Decimal("9.001"), TICK_STOCK) == Decimal("9.01")
-    assert round_down_to_tick(Decimal("9.009"), TICK_STOCK) == Decimal("9.00")
-    assert round_to_tick(Decimal("4.5155"), TICK_ETF) == Decimal("4.516")
-    assert round_up_to_tick(Decimal("4.5151"), TICK_ETF) == Decimal("4.516")
-    assert round_down_to_tick(Decimal("4.5159"), TICK_ETF) == Decimal("4.515")
+    assert round_to_tick(Decimal("9.005"), TICK) == Decimal("9.01")
+    assert round_to_tick(Decimal("9.004"), TICK) == Decimal("9.00")
+    assert round_up_to_tick(Decimal("9.001"), TICK) == Decimal("9.01")
+    assert round_down_to_tick(Decimal("9.009"), TICK) == Decimal("9.00")
 
 
 def test_round_to_tick_keeps_exponent() -> None:
-    assert str(round_to_tick(Decimal("9"), TICK_STOCK)) == "9.00"
-    assert str(round_to_tick(Decimal("4.5"), TICK_ETF)) == "4.500"
+    assert str(round_to_tick(Decimal("9"), TICK)) == "9.00"
 
 
 def test_is_on_tick() -> None:
-    assert is_on_tick(Decimal("9.01"), TICK_STOCK)
-    assert not is_on_tick(Decimal("9.015"), TICK_STOCK)
-    assert is_on_tick(Decimal("4.515"), TICK_ETF)
-    assert not is_on_tick(Decimal("4.5155"), TICK_ETF)
+    assert is_on_tick(Decimal("9.01"), TICK)
+    assert not is_on_tick(Decimal("9.015"), TICK)

@@ -8,10 +8,11 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from .models import AssetType, Board, Exchange, OrderType, PriceLimits, Side
+from .models import Board, Exchange, OrderType, PriceLimits, Side
 from .money import D, round_to_tick
 
 SYMBOL_RE = re.compile(r"^(\d{6})\.(SH|SZ)$")
+STOCK_PREFIXES = {Exchange.SH: ("6",), Exchange.SZ: ("00", "30")}  # 沪市 6；深市 00、30
 
 LIMIT_RATE_MAIN = Decimal("0.10")
 LIMIT_RATE_20 = Decimal("0.20")
@@ -26,32 +27,28 @@ class SymbolError(ValueError):
     """标的代码不受支持。"""
 
 
-def parse_symbol(symbol: str) -> tuple[str, Exchange]:
-    """校验并拆分代码，只接受 6 位数字加 .SH 或 .SZ；北交所等一律拒绝。"""
+def split_symbol(symbol: str) -> tuple[str, Exchange]:
+    """只校验格式并拆分：6 位数字加 .SH 或 .SZ。指数代码（如基准 000300.SH）也用它。"""
     m = SYMBOL_RE.match(symbol)
     if m is None:
         raise SymbolError(f"不支持的标的代码: {symbol}")
     return m.group(1), Exchange(m.group(2))
 
 
-def guess_asset_type(symbol: str) -> AssetType:
-    """仅凭代码猜资产类型：沪市 5 开头、深市 1 开头为基金（ETF），其余为股票。
+def parse_symbol(symbol: str) -> tuple[str, Exchange]:
+    """校验可交易标的并拆分：只支持沪深 A 股股票（沪市 6 开头，深市 00、30 开头）。
 
-    只用于行情价格取整等不影响账务判定的场合；账务判定以参考数据中的资产类型为准。
+    ETF、LOF 等基金，B 股、债券、指数与北交所一律拒绝（方案 8.1 标的不支持）。
     """
-    code, exchange = parse_symbol(symbol)
-    if (exchange is Exchange.SH and code.startswith("5")) or (
-        exchange is Exchange.SZ and code.startswith("1")
-    ):
-        return AssetType.ETF
-    return AssetType.STOCK
+    code, exchange = split_symbol(symbol)
+    if not code.startswith(STOCK_PREFIXES[exchange]):
+        raise SymbolError(f"不支持的标的代码: {symbol}，只支持沪深 A 股股票")
+    return code, exchange
 
 
-def board_of(symbol: str, asset_type: AssetType) -> Board:
-    """688、689 开头为科创板；300、301 开头为创业板；其余为主板。ETF 一律按主板规则。"""
+def board_of(symbol: str) -> Board:
+    """688、689 开头为科创板；300、301 开头为创业板；其余为主板。"""
     code, _ = parse_symbol(symbol)
-    if asset_type is AssetType.ETF:
-        return Board.MAIN
     if code.startswith(("688", "689")):
         return Board.STAR
     if code.startswith(("300", "301")):
@@ -64,10 +61,8 @@ def is_st(name: str) -> bool:
     return "ST" in name.upper()
 
 
-def limit_rate(board: Board, asset_type: AssetType, etf_20pct: bool = False) -> Decimal:
-    """涨跌幅比例：主板 10%（含风险警示股），创业板与科创板 20%，ETF 10%，名单内 ETF 20%。"""
-    if asset_type is AssetType.ETF:
-        return LIMIT_RATE_20 if etf_20pct else LIMIT_RATE_MAIN
+def limit_rate(board: Board) -> Decimal:
+    """涨跌幅比例：主板 10%（含风险警示股），创业板与科创板 20%。"""
     return LIMIT_RATE_20 if board in (Board.STAR, Board.CHINEXT) else LIMIT_RATE_MAIN
 
 
@@ -118,7 +113,7 @@ def validate_qty(
 ) -> str | None:
     """校验申报数量，返回错误码或 None。
 
-    主板、创业板、ETF：买入 100 股整数倍；卖出时不足 100 股的零股须一次性卖出。
+    主板、创业板：买入 100 股整数倍；卖出时不足 100 股的零股须一次性卖出。
     科创板：买入不少于 200 股、超出部分 1 股递增；卖出不足 200 股的余股须一次性卖出。
     position_qty 为卖出时的当前持仓数量，用于判断零股或余股是否一次性卖出。
     """

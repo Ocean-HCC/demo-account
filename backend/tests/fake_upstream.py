@@ -184,17 +184,11 @@ def stock_rows(start: date, end: date, close: float = 9.0) -> list[dict[str, Any
 def upstream_for_day() -> FakeUpstream:
     """2026-09-24（周四）盘中的上游。
 
-    包含浦发银行与沪深 300ETF 标的、日线到前一交易日、当日实时行、指数、停牌与分红。
+    包含浦发银行标的、日线到前一交易日、当日实时行、指数、停牌与分红。
     """
     up = FakeUpstream()
     up.instruments = [
         {"symbol": PF, "name": "浦发银行", "code": "600000", "asset_type": "stock"},
-        {
-            "symbol": "510300.SH",
-            "name": "沪深300ETF华泰柏瑞",
-            "code": "510300",
-            "asset_type": "etf",
-        },
     ]
     up.daily[PF] = stock_rows(date(2026, 8, 1), date(2026, 9, 23)) + [
         {

@@ -14,7 +14,6 @@ import pytest
 
 from demo_account.core.matching import amount_to_qty, freeze_amount, slippage_price
 from demo_account.core.models import (
-    AssetType,
     Board,
     EventType,
     FillKind,
@@ -23,7 +22,7 @@ from demo_account.core.models import (
     Side,
     Snapshot,
 )
-from demo_account.core.money import TICK_STOCK, round_cent
+from demo_account.core.money import TICK, round_cent
 from demo_account.market.base import CorporateAction
 from demo_account.scheduler import Scheduler
 from demo_account.services.delivery import sign
@@ -46,7 +45,7 @@ def test_market_buy_fills_at_snapshot_plus_slippage(tmp_path: Path) -> None:
     assert o.frozen_cash > 0
     assert env.cycle()["filled"] == 1
     f = env.fills(a)[0]
-    assert f.price == slippage_price(pc, Side.BUY, SLIP, TICK_STOCK)
+    assert f.price == slippage_price(pc, Side.BUY, SLIP, TICK)
     done = env.get(a, o)
     assert done.status is OrderStatus.FILLED and done.frozen_cash == 0
     pos = env.position(a, PF)
@@ -95,7 +94,7 @@ def test_limit_order_waits_then_fills_at_limit_price(tmp_path: Path) -> None:
     env.mock.set_price(PF, pc)
     lp = pc - Decimal("0.10")
     o = env.buy(a, PF, 1000, order_type=OrderType.LIMIT, limit_price=lp)
-    assert o.frozen_cash == freeze_amount(1000, lp, a.fee_params, AssetType.STOCK)
+    assert o.frozen_cash == freeze_amount(1000, lp, a.fee_params)
     assert env.cycle()["filled"] == 0
     env.mock.set_price(PF, pc - Decimal("0.12"))
     assert env.cycle()["filled"] == 1
@@ -170,7 +169,7 @@ def test_open_order_fills_next_day_at_open_plus_slippage(tmp_path: Path) -> None
     assert env.c.engine.run_open_matching()["filled"] == 1
     bar = env.mock.bar("000001.SZ", FRI)
     assert bar is not None and bar.open is not None
-    assert env.fills(a)[0].price == slippage_price(bar.open, Side.BUY, SLIP, TICK_STOCK)
+    assert env.fills(a)[0].price == slippage_price(bar.open, Side.BUY, SLIP, TICK)
 
 
 def test_close_orders_fill_at_close_and_protect_price_expires(tmp_path: Path) -> None:
@@ -223,32 +222,16 @@ def test_settlement_finalizes_nav_unlocks_t1_expires_limits_and_is_idempotent(
     assert env.c.settlement.reconcile(a.id)["ok"]
 
 
-def test_corporate_actions_bonus_dividend_etf_factor_and_entitlement(tmp_path: Path) -> None:
+def test_corporate_actions_bonus_dividend_and_entitlement(tmp_path: Path) -> None:
     env = make_env(tmp_path)
     env.mock.add_corporate_action(
-        CorporateAction(
-            PF, FRI, THU, FRI, Decimal("0.2"), Decimal("0"), Decimal("0.42"), None, "mock"
-        )
-    )
-    env.mock.add_corporate_action(
-        CorporateAction(
-            "510300.SH",
-            FRI,
-            THU,
-            None,
-            Decimal("0"),
-            Decimal("0"),
-            Decimal("0"),
-            Decimal("1.01234"),
-            "mock",
-        )
+        CorporateAction(PF, FRI, THU, FRI, Decimal("0.2"), Decimal("0"), Decimal("0.42"), "mock")
     )
     env.go(THU, 9, 35)
     a = env.account()
-    for sym, qty in ((PF, 1000), ("510300.SH", 10000)):
-        env.mock.set_price(sym, env.prev_close(sym))
-        env.buy(a, sym, qty)
-        env.cycle()
+    env.mock.set_price(PF, env.prev_close(PF))
+    env.buy(a, PF, 1000)
+    env.cycle()
     assert env.settle(THU).status == "done"
     env.go(FRI, 9, 35)
     env.mock.set_price(PF, env.prev_close(PF))
@@ -258,14 +241,9 @@ def test_corporate_actions_bonus_dividend_etf_factor_and_entitlement(tmp_path: P
     assert env.settle(FRI).status == "done"
     pos = env.position(a, PF)
     assert pos is not None and pos.qty == 1000 + 200 + 500
-    etf = env.position(a, "510300.SH")
-    assert etf is not None and etf.qty == 10123
-    etf_bar = env.mock.bar("510300.SH", FRI)
-    assert etf_bar is not None
-    frac = round_cent(Decimal("0.4") * etf_bar.close)
-    assert env.cash(a) - cash_before == Decimal("420.00") + frac
+    assert env.cash(a) - cash_before == Decimal("420.00")
     types = env.types(a)
-    assert types.count("corporate_action") == 3
+    assert types.count("corporate_action") == 2
     # 每个账务变更恰有一条事件
     fills = env.fills(a)
     trades = [f for f in fills if f.kind is FillKind.TRADE]
@@ -275,6 +253,17 @@ def test_corporate_actions_bonus_dividend_etf_factor_and_entitlement(tmp_path: P
     assert env.c.settlement.settle(FRI).status == "done"
     assert len(env.fills(a)) == len(fills)
     assert env.c.settlement.reconcile(a.id)["ok"]
+
+
+def test_etf_and_other_non_stock_symbols_are_rejected(tmp_path: Path) -> None:
+    """ETF 等基金、指数不在范围内，按标的不支持拒绝并留痕（方案 8.1）。"""
+    env = make_env(tmp_path)
+    env.go(THU, 9, 35)
+    a = env.account()
+    for sym in ("510300.SH", "159915.SZ", "000300.SH"):
+        o = env.buy(a, sym, 100)
+        assert (o.status, o.reason_code) == (OrderStatus.REJECTED, "SYMBOL_UNSUPPORTED")
+    assert env.types(a).count("order_rejected") == 3
 
 
 def test_suspension_defers_open_order_until_limit(tmp_path: Path) -> None:
@@ -357,9 +346,7 @@ def test_amount_buy_converts_to_lots_at_freeze_price(tmp_path: Path) -> None:
     lim = env.limits(PF)
     assert lim.up is not None
     o = env.buy(a, PF, None, amount=Decimal("10000"))
-    assert o.qty == amount_to_qty(
-        Decimal("10000"), lim.up, Board.MAIN, AssetType.STOCK, a.fee_params
-    )
+    assert o.qty == amount_to_qty(Decimal("10000"), lim.up, Board.MAIN, a.fee_params)
     assert o.amount == Decimal("10000") and o.qty % 100 == 0
 
 

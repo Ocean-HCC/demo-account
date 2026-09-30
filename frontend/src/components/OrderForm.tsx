@@ -112,7 +112,6 @@ export function OrderForm({ accountId, disabled, preset }: Props) {
               <Space size={4}>
                 <span>{i.symbol}</span>
                 <span>{i.name}</span>
-                {i.asset_type === 'etf' && <Tag bordered={false}>ETF</Tag>}
                 {i.is_st && <Tag color="red">ST</Tag>}
               </Space>
             ),
@@ -179,7 +178,7 @@ export function OrderForm({ accountId, disabled, preset }: Props) {
   const side = values?.side ?? 'buy';
   const orderType = values?.order_type ?? 'limit';
   const d = inst.data;
-  const tick = d?.asset_type === 'etf' ? 0.001 : 0.01;
+  const tick = 0.01; // 股票申报价格最小变动单位
 
   return (
     <Form<FormValues>

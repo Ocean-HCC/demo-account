@@ -14,8 +14,8 @@ from typing import Any
 
 from ..clock import Clock
 from ..core.instruments import board_of, is_st, parse_symbol
-from ..core.models import AssetType, Instrument, PriceLimits, Snapshot
-from ..core.money import D, round_to_tick, tick_for
+from ..core.models import Instrument, PriceLimits, Snapshot
+from ..core.money import TICK, D, round_to_tick
 from ..core.rules import BEIJING, T_0930, T_1130, T_1300, T_1500, to_beijing
 from .base import CalendarData, CorporateAction, DailyBar, Suspension
 
@@ -34,14 +34,13 @@ DEFAULT_HOLIDAYS: frozenset[date] = frozenset(
     }
 )
 
-# 代码、名称、类型、基准价、上市日
-DEFAULT_UNIVERSE: list[tuple[str, str, AssetType, str, date | None]] = [
-    ("600000.SH", "浦发银行", AssetType.STOCK, "9.00", date(1999, 11, 10)),
-    ("000001.SZ", "平安银行", AssetType.STOCK, "11.30", date(1991, 4, 3)),
-    ("300750.SZ", "宁德时代", AssetType.STOCK, "250.00", date(2018, 6, 11)),
-    ("688981.SH", "中芯国际", AssetType.STOCK, "90.00", date(2020, 7, 16)),
-    ("510300.SH", "沪深300ETF", AssetType.ETF, "4.515", date(2012, 5, 28)),
-    ("000016.SZ", "*ST康佳A", AssetType.STOCK, "3.20", date(1992, 3, 27)),
+# 代码、名称、基准价、上市日
+DEFAULT_UNIVERSE: list[tuple[str, str, str, date | None]] = [
+    ("600000.SH", "浦发银行", "9.00", date(1999, 11, 10)),
+    ("000001.SZ", "平安银行", "11.30", date(1991, 4, 3)),
+    ("300750.SZ", "宁德时代", "250.00", date(2018, 6, 11)),
+    ("688981.SH", "中芯国际", "90.00", date(2020, 7, 16)),
+    ("000016.SZ", "*ST康佳A", "3.20", date(1992, 3, 27)),
 ]
 
 BENCHMARK_BASE = Decimal("4500")
@@ -56,21 +55,20 @@ class MockMarket:
         clock: Clock,
         seed: int = 2026,
         holidays: frozenset[date] = DEFAULT_HOLIDAYS,
-        universe: Sequence[tuple[str, str, AssetType, str, date | None]] | None = None,
+        universe: Sequence[tuple[str, str, str, date | None]] | None = None,
     ) -> None:
         self.clock = clock
         self.seed = seed
         self.holidays = holidays
         self._instruments: dict[str, Instrument] = {}
         self._base: dict[str, Decimal] = {}
-        for symbol, name, asset_type, base, list_date in universe or DEFAULT_UNIVERSE:
-            self.add_instrument(symbol, name, asset_type, Decimal(base), list_date)
+        for symbol, name, base, list_date in universe or DEFAULT_UNIVERSE:
+            self.add_instrument(symbol, name, Decimal(base), list_date)
         self._bars: dict[tuple[str, date], DailyBar] = {}
         self._suspensions: dict[date, list[Suspension]] = {}
         self._actions: dict[str, list[CorporateAction]] = {}
         self._price_override: dict[str, Decimal] = {}
         self._halted: set[str] = set()
-        self._factor_override: dict[tuple[str, date], Decimal] = {}
         self.fail_quotes = False
         self.fail_reference = False
 
@@ -79,7 +77,6 @@ class MockMarket:
         self,
         symbol: str,
         name: str,
-        asset_type: AssetType,
         base_price: Decimal,
         list_date: date | None,
     ) -> None:
@@ -87,8 +84,7 @@ class MockMarket:
         self._instruments[symbol] = Instrument(
             symbol=symbol,
             name=name,
-            asset_type=asset_type,
-            board=board_of(symbol, asset_type),
+            board=board_of(symbol),
             exchange=exchange,
             list_date=list_date,
             is_st=is_st(name),
@@ -112,8 +108,6 @@ class MockMarket:
 
     def add_corporate_action(self, action: CorporateAction) -> None:
         self._actions.setdefault(action.symbol, []).append(action)
-        if action.factor is not None:
-            self._factor_override[(action.symbol, action.ex_date)] = action.factor
 
     def set_daily_bar(self, bar: DailyBar) -> None:
         self._bars[(bar.symbol, bar.trade_date)] = bar
@@ -161,7 +155,7 @@ class MockMarket:
             return self._bars[key]
         if self._is_suspended(symbol, d):
             return None
-        tick = tick_for(self._instruments[symbol].asset_type)
+        tick = TICK
         day = ANCHOR if self.is_open(ANCHOR) else self._next_open_day(ANCHOR)
         close_prev = self._base[symbol]
         while day <= d:
@@ -171,8 +165,7 @@ class MockMarket:
                 close_prev = existing.close
             elif not self._is_suspended(symbol, day):
                 rng = self._rng(symbol, day)
-                factor = self._factor_override.get(k)
-                ref = close_prev if factor is None else round_to_tick(close_prev / factor, tick)
+                ref = close_prev
                 r = max(-0.09, min(0.09, rng.gauss(0, 0.012)))
                 close = round_to_tick(ref * (1 + Decimal(repr(r))), tick)
                 open_ = round_to_tick(ref * (1 + Decimal(repr(rng.gauss(0, 0.004)))), tick)
@@ -274,7 +267,7 @@ class MockMarket:
             bar = self.bar(symbol, today)
             if bar is None or bar.open is None or bar.prev_close is None:
                 continue
-            tick = tick_for(inst.asset_type)
+            tick = TICK
             override = self._price_override.get(symbol)
             if override is not None:
                 last = override
